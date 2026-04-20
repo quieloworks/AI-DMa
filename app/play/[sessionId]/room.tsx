@@ -1,0 +1,1018 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { io, type Socket } from "socket.io-client";
+
+type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
+
+type CharData = {
+  abilities?: Record<Ability, number>;
+  abilityRacialBonus?: Partial<Record<Ability, number>>;
+  skills?: string[];
+  savingThrows?: Ability[];
+  hp?: { current: number; max: number; temp: number; hitDie?: number };
+  ac?: number;
+  speed?: number;
+  initiativeBonus?: number;
+  proficiencies?: { weapons?: string[]; armor?: string[]; tools?: string[]; languages?: string[] };
+  equipment?: Array<{ name: string; qty: number; damage?: string; kind?: string }>;
+  money?: { cp: number; sp: number; ep: number; gp: number; pp: number };
+  spells?: {
+    ability?: Ability;
+    known?: Array<{ name: string; level: number; prepared: boolean }>;
+    slots?: Record<string, { max: number; used: number }>;
+  };
+  statusEffects?: string[];
+  xp?: number;
+};
+
+type Player = {
+  player_id: string;
+  token: string;
+  character: { name: string; class: string | null; race: string | null; level: number; data: CharData } | null;
+};
+
+type Tab = "personaje" | "acciones" | "chat" | "dados";
+
+type ChatMsg = { id: string; from: "dm" | "me" | "system"; text: string; kind: "public" | "private" };
+
+type DiceResult = { label?: string; expression: string; total: number; breakdown: string };
+
+type DiceRequest = { id: string; playerId: string; expression: string; label?: string; dc?: number };
+
+const ABILITIES_ORDER: Ability[] = ["fue", "des", "con", "int", "sab", "car"];
+
+const SKILL_ABILITY: Record<string, Ability> = {
+  acrobacias: "des",
+  "trato con animales": "sab",
+  arcanos: "int",
+  atletismo: "fue",
+  engaño: "car",
+  historia: "int",
+  perspicacia: "sab",
+  intimidación: "car",
+  investigación: "int",
+  medicina: "sab",
+  naturaleza: "int",
+  percepción: "sab",
+  interpretación: "car",
+  persuasión: "car",
+  religión: "int",
+  "juego de manos": "des",
+  sigilo: "des",
+  supervivencia: "sab",
+};
+
+function abilityMod(score: number): number {
+  return Math.floor((score - 10) / 2);
+}
+
+function profBonus(level: number): number {
+  if (level >= 17) return 6;
+  if (level >= 13) return 5;
+  if (level >= 9) return 4;
+  if (level >= 5) return 3;
+  return 2;
+}
+
+function totalAbility(abilities: CharData["abilities"], racial: CharData["abilityRacialBonus"], a: Ability): number {
+  const base = abilities?.[a] ?? 10;
+  const extra = racial?.[a] ?? 0;
+  return base + extra;
+}
+
+function formatMod(n: number): string {
+  return n >= 0 ? `+${n}` : `${n}`;
+}
+
+export function PlayRoom({
+  sessionId,
+  storyTitle,
+  storyMode,
+  players,
+  initialPlayerId,
+  initialToken,
+}: {
+  sessionId: string;
+  storyTitle: string;
+  storyMode: "auto" | "assistant";
+  players: Player[];
+  initialPlayerId?: string;
+  initialToken?: string;
+}) {
+  const clientIdRef = useRef<string>(Math.random().toString(36).slice(2) + Date.now().toString(36));
+  const [picked, setPicked] = useState<Player | null>(() => {
+    if (initialPlayerId && initialToken) {
+      const found = players.find((p) => p.player_id === initialPlayerId && p.token === initialToken);
+      if (found) return found;
+    }
+    return null;
+  });
+  const [currentData, setCurrentData] = useState<CharData>(() => picked?.character?.data ?? {});
+  const [tab, setTab] = useState<Tab>("personaje");
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [recentRolls, setRecentRolls] = useState<DiceResult[]>([]);
+  const [pendingDice, setPendingDice] = useState<DiceRequest[]>([]);
+  const [selectedDice, setSelectedDice] = useState<string>("1d20");
+  const [selectedLabel, setSelectedLabel] = useState<string>("");
+  const [diceModifier, setDiceModifier] = useState<number>(0);
+  const [dmThinking, setDmThinking] = useState(false);
+  const [actionToast, setActionToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatEnd = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (picked?.character?.data) setCurrentData(picked.character.data);
+  }, [picked]);
+
+  useEffect(() => {
+    if (!picked) return;
+    const s = io({ path: "/socket.io", query: { clientId: clientIdRef.current } });
+    s.on("connect", () => {
+      s.emit("session:join", {
+        sessionId,
+        role: "player",
+        playerId: picked.player_id,
+        token: picked.token,
+        name: picked.character?.name,
+      });
+    });
+
+    s.on(
+      "chat:message",
+      (msg: { role: string; text: string; kind?: string; playerId?: string; originClientId?: string }) => {
+        if (msg.originClientId === clientIdRef.current) return;
+        const mine = msg.playerId === picked.player_id;
+        if (msg.kind === "private" && !mine && msg.role !== "dm") return;
+        setChat((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            from: msg.role === "dm" ? "dm" : mine ? "me" : "dm",
+            text: msg.text,
+            kind: (msg.kind as "public" | "private") ?? "public",
+          },
+        ]);
+        if (msg.role === "dm") setDmThinking(false);
+      }
+    );
+
+    s.on(
+      "dice:result",
+      (evt: {
+        by: { playerId?: string; role: string; label?: string };
+        result: DiceResult;
+        requestId?: string;
+      }) => {
+        setRecentRolls((prev) => [evt.result, ...prev].slice(0, 12));
+        const mine = evt.by.playerId === picked.player_id;
+        if (mine) {
+          setChat((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).slice(2),
+              from: "system",
+              text: `🎲 ${evt.result.expression}${evt.by.label ? ` (${evt.by.label})` : ""}: ${evt.result.breakdown}`,
+              kind: "public",
+            },
+          ]);
+        }
+        if (evt.requestId) {
+          setPendingDice((prev) => prev.filter((r) => r.id !== evt.requestId));
+        }
+      }
+    );
+
+    s.on("dice:request", (evt: { requests: Array<Omit<DiceRequest, "id"> & { id?: string }> }) => {
+      const norm = evt.requests.map((r) => ({
+        id: r.id ?? Math.random().toString(36).slice(2),
+        playerId: r.playerId,
+        expression: r.expression,
+        label: r.label,
+        dc: r.dc,
+      }));
+      setPendingDice((prev) => [...norm, ...prev].slice(0, 6));
+      const first = norm[0];
+      if (first) {
+        setSelectedDice(first.expression);
+        setSelectedLabel(first.label ?? "");
+        setDiceModifier(0);
+        setTab("dados");
+      }
+    });
+
+    s.on("character:update", (evt: { playerId: string; patch: Partial<CharData> }) => {
+      if (evt.playerId !== picked.player_id) return;
+      setCurrentData((prev) => ({ ...prev, ...evt.patch }));
+    });
+
+    setSocket(s);
+    return () => {
+      s.disconnect();
+    };
+  }, [picked, sessionId]);
+
+  useEffect(() => {
+    chatEnd.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat, tab]);
+
+  const hp = currentData.hp ?? { current: 0, max: 0, temp: 0 };
+  const ac = currentData.ac ?? 10;
+  const speed = currentData.speed ?? 30;
+  const level = picked?.character?.level ?? 1;
+  const prof = profBonus(level);
+  const statusEffects = currentData.statusEffects ?? [];
+
+  const flashToast = useCallback((text: string) => {
+    setActionToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setActionToast(null), 1800);
+  }, []);
+
+  const triggerDm = useCallback(
+    async (text: string) => {
+      if (!picked) return;
+      if (storyMode !== "auto") return;
+      setDmThinking(true);
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            mode: "auto",
+            action: "player",
+            playerId: picked.player_id,
+            playerName: picked.character?.name ?? "Jugador",
+            text,
+            clientId: clientIdRef.current,
+          }),
+        });
+        if (!res.body) throw new Error("sin stream");
+        const reader = res.body.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      } catch (err) {
+        setChat((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            from: "system",
+            text: `⚠ El DM no respondió: ${(err as Error).message}`,
+            kind: "public",
+          },
+        ]);
+        setDmThinking(false);
+      }
+    },
+    [picked, sessionId, storyMode]
+  );
+
+  const sendChat = useCallback(
+    (text: string, kind: "public" | "private" = "public", options?: { triggerDm?: boolean }) => {
+      const trimmed = text.trim();
+      if (!trimmed || !picked || !socket) return;
+      socket.emit("chat:send", {
+        sessionId,
+        role: "player",
+        playerId: picked.player_id,
+        kind,
+        text: trimmed,
+        clientId: clientIdRef.current,
+      });
+      setChat((prev) => [
+        ...prev,
+        { id: Math.random().toString(36).slice(2), from: "me", text: trimmed, kind },
+      ]);
+      if (options?.triggerDm && kind === "public") {
+        void triggerDm(trimmed);
+      }
+    },
+    [picked, sessionId, socket, triggerDm]
+  );
+
+  const roll = useCallback(
+    (expression: string, label?: string, requestId?: string) => {
+      if (!picked || !socket) return;
+      socket.emit("dice:roll", {
+        sessionId,
+        by: { role: "player", playerId: picked.player_id, label },
+        expression,
+        requestId,
+      });
+    },
+    [picked, sessionId, socket]
+  );
+
+  const handleSendInput = useCallback(
+    (kind: "public" | "private" = "public") => {
+      if (!input.trim()) return;
+      sendChat(input, kind, { triggerDm: kind === "public" });
+      setInput("");
+    },
+    [input, sendChat]
+  );
+
+  const rollPending = useCallback(
+    (req: DiceRequest) => {
+      roll(req.expression, req.label ?? "Solicitado por el DM", req.id);
+    },
+    [roll]
+  );
+
+  const rollSelected = useCallback(() => {
+    let expr = selectedDice;
+    if (diceModifier !== 0 && /^\d+d\d+$/.test(selectedDice)) {
+      expr = `${selectedDice}${diceModifier >= 0 ? "+" : ""}${diceModifier}`;
+    }
+    roll(expr, selectedLabel || undefined);
+  }, [selectedDice, selectedLabel, diceModifier, roll]);
+
+  if (!picked) {
+    return (
+      <div className="min-h-screen grain mesh-bg">
+        <div className="mx-auto max-w-md px-5 py-12">
+          <p className="label mb-2">Te unes a</p>
+          <h1 className="mb-6">{storyTitle}</h1>
+          <p className="mb-4 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+            Elige tu personaje:
+          </p>
+          <div className="space-y-3">
+            {players.map((p) => (
+              <button key={p.player_id} onClick={() => setPicked(p)} className="card block w-full text-left">
+                <p>{p.character?.name ?? "Aventurero"}</p>
+                <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+                  {p.character?.race ?? ""} · {p.character?.class ?? ""} nv. {p.character?.level ?? 1}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{ background: "var(--color-bg-primary)", height: "100dvh" }}
+    >
+      <header
+        className="shrink-0"
+        style={{ background: "var(--color-bg-primary)", borderBottom: "0.5px solid var(--color-border)" }}
+      >
+        <div className="px-4 pb-1 pt-3">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="label" style={{ fontSize: 10 }}>
+                {storyTitle}
+              </p>
+              <h2 style={{ fontSize: 18 }}>{picked.character?.name}</h2>
+            </div>
+            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+              <span>HP {hp.current}/{hp.max}</span>
+              <span>·</span>
+              <span>CA {ac}</span>
+              <span>·</span>
+              <span>V{speed}</span>
+            </div>
+          </div>
+          {statusEffects.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {statusEffects.map((e) => (
+                <span key={e} className="badge" style={{ fontSize: 10 }}>
+                  {e}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex px-2 pb-2 pt-1">
+          {(["personaje", "acciones", "chat", "dados"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className="flex-1 rounded-md px-2 py-1.5 text-xs"
+              style={{
+                color: tab === t ? "var(--color-accent)" : "var(--color-text-hint)",
+                background: tab === t ? "var(--color-accent-bg)" : "transparent",
+              }}
+            >
+              {t[0].toUpperCase() + t.slice(1)}
+              {t === "dados" && pendingDice.length > 0 && (
+                <span
+                  className="ml-1 inline-block rounded-full"
+                  style={{
+                    background: "var(--color-accent)",
+                    color: "white",
+                    padding: "0 6px",
+                    fontSize: 10,
+                    fontWeight: 500,
+                  }}
+                >
+                  {pendingDice.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {actionToast && (
+        <div
+          className="pointer-events-none fixed left-1/2 z-40 -translate-x-1/2 rounded-full px-4 py-2 text-xs"
+          style={{
+            top: 72,
+            background: "var(--color-accent)",
+            color: "white",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            animation: "fadeUp 0.25s ease both",
+            maxWidth: "90%",
+          }}
+        >
+          {actionToast}
+        </div>
+      )}
+
+      <main className="min-h-0 flex-1 overflow-hidden">
+        {tab === "personaje" && (
+          <div className="h-full overflow-y-auto px-4 py-4 pb-8">
+            <CharacterSheet data={currentData} level={level} prof={prof} />
+          </div>
+        )}
+
+        {tab === "acciones" && (
+          <div className="h-full overflow-y-auto px-4 py-4 pb-8">
+            <ActionsPanel
+              data={currentData}
+              level={level}
+              prof={prof}
+              onRoll={(expr, label) => {
+                roll(expr, label);
+                flashToast(`🎲 ${label ?? expr}`);
+              }}
+              onAction={(text) => {
+                sendChat(text, "public", { triggerDm: true });
+                flashToast(text);
+                setTab("chat");
+              }}
+            />
+          </div>
+        )}
+
+        {tab === "chat" && (
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <div className="space-y-2">
+                {chat.length === 0 && (
+                  <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                    Aún no hay mensajes. Escribe al DM lo que quieres hacer.
+                  </p>
+                )}
+                {chat.map((m) => (
+                  <ChatItem key={m.id} m={m} />
+                ))}
+                {dmThinking && (
+                  <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                    el DM está pensando…
+                  </p>
+                )}
+                <div ref={chatEnd} />
+              </div>
+            </div>
+            <div
+              className="shrink-0 px-3 py-2"
+              style={{ borderTop: "0.5px solid var(--color-border)", background: "var(--color-bg-primary)" }}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  className="input"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Mensaje al DM…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSendInput("public");
+                    }
+                  }}
+                />
+                <button
+                  className="btn-ghost"
+                  onClick={() => handleSendInput("private")}
+                  title="Enviar privado al DM"
+                  style={{ padding: "0 10px" }}
+                >
+                  🔒
+                </button>
+                <button className="btn-accent" onClick={() => handleSendInput("public")} disabled={!input.trim()}>
+                  ↑
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "dados" && (
+          <div className="h-full overflow-y-auto px-4 py-3 pb-8">
+            <DicePanel
+              pending={pendingDice}
+              selected={selectedDice}
+              selectedLabel={selectedLabel}
+              modifier={diceModifier}
+              recent={recentRolls}
+              data={currentData}
+              prof={prof}
+              onSelect={(expr, label) => {
+                setSelectedDice(expr);
+                setSelectedLabel(label ?? "");
+              }}
+              onModifier={setDiceModifier}
+              onRollPending={rollPending}
+              onRoll={rollSelected}
+              onDismiss={(id) => setPendingDice((prev) => prev.filter((r) => r.id !== id))}
+            />
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function ChatItem({ m }: { m: ChatMsg }) {
+  if (m.from === "system") {
+    return (
+      <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+        {m.text}
+      </p>
+    );
+  }
+  const mine = m.from === "me";
+  return (
+    <div className={mine ? "flex justify-end" : "flex"}>
+      <div
+        className="max-w-[85%] rounded-lg px-3 py-2 text-sm"
+        style={{
+          background: m.kind === "private"
+            ? "var(--color-accent-bg)"
+            : mine
+              ? "var(--color-bg-tertiary)"
+              : "var(--color-bg-secondary)",
+          border: `0.5px solid ${m.kind === "private" ? "var(--color-accent)" : "var(--color-border)"}`,
+          color: "var(--color-text-primary)",
+        }}
+      >
+        {m.kind === "private" && (
+          <span className="badge mb-1" style={{ fontSize: 10 }}>
+            {mine ? "privado al DM" : "🔒 susurro del DM"}
+          </span>
+        )}
+        <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{m.text}</p>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md p-3 text-center" style={{ background: "var(--color-bg-tertiary)" }}>
+      <p className="label" style={{ fontSize: 10 }}>
+        {label}
+      </p>
+      <p style={{ fontFamily: "var(--font-display)", fontSize: 20 }}>{value}</p>
+    </div>
+  );
+}
+
+function CharacterSheet({ data, level, prof }: { data: CharData; level: number; prof: number }) {
+  const hp = data.hp ?? { current: 0, max: 0, temp: 0 };
+  const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
+  const racial = data.abilityRacialBonus ?? {};
+  return (
+    <div className="space-y-3">
+      <div className="card">
+        <p className="label mb-2">Vitales</p>
+        <div className="grid grid-cols-4 gap-2">
+          <Stat label="HP" value={`${hp.current}/${hp.max}`} />
+          <Stat label="CA" value={data.ac ?? 10} />
+          <Stat label="Vel." value={data.speed ?? 30} />
+          <Stat label="PB" value={`+${prof}`} />
+        </div>
+        {hp.temp > 0 && (
+          <p className="mt-2 text-xs" style={{ color: "var(--color-accent)" }}>
+            +{hp.temp} HP temporales
+          </p>
+        )}
+      </div>
+
+      <div className="card">
+        <p className="label mb-2">Atributos</p>
+        <div className="grid grid-cols-6 gap-1">
+          {ABILITIES_ORDER.map((a) => {
+            const total = totalAbility(abilities, racial, a);
+            return (
+              <div key={a} className="text-center">
+                <p className="label" style={{ fontSize: 9 }}>
+                  {a.toUpperCase()}
+                </p>
+                <p style={{ fontFamily: "var(--font-display)", fontSize: 16 }}>{total}</p>
+                <p className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
+                  {formatMod(abilityMod(total))}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {(data.equipment ?? []).length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Equipamiento</p>
+          <ul className="space-y-1 text-sm">
+            {(data.equipment ?? []).map((e, i) => (
+              <li key={i}>
+                · {e.qty > 1 ? e.qty + " × " : ""}
+                {e.name}
+                {e.damage ? <span style={{ color: "var(--color-text-hint)" }}> · {e.damage}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {(data.spells?.known?.length ?? 0) > 0 && (
+        <div className="card">
+          <p className="label mb-2">Conjuros</p>
+          <div className="mb-2 flex flex-wrap gap-1">
+            {Object.entries(data.spells?.slots ?? {}).map(([lvl, s]) => (
+              <span key={lvl} className="badge" style={{ fontSize: 10 }}>
+                Nv {lvl}: {s.max - s.used}/{s.max}
+              </span>
+            ))}
+          </div>
+          <ul className="space-y-1 text-sm">
+            {(data.spells?.known ?? []).map((s, i) => (
+              <li key={i}>
+                · [{s.level}] {s.name} {s.prepared ? "✔" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="text-center text-xs" style={{ color: "var(--color-text-hint)" }}>
+        nv. {level} · XP {data.xp ?? 0}
+      </p>
+    </div>
+  );
+}
+
+function ActionsPanel({
+  data,
+  level,
+  prof,
+  onRoll,
+  onAction,
+}: {
+  data: CharData;
+  level: number;
+  prof: number;
+  onRoll: (expr: string, label?: string) => void;
+  onAction: (text: string) => void;
+}) {
+  const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
+  const racial = data.abilityRacialBonus ?? {};
+  const skills = data.skills ?? [];
+  const weapons = (data.equipment ?? []).filter((e) =>
+    /espada|hacha|arco|daga|maza|lanza|martillo|ballesta|bast(ó|o)n|jabalina|cimitarra|garrote|rapiera|lanza|honda/i.test(e.name)
+  );
+  const consumables = (data.equipment ?? []).filter((e) =>
+    /poci(ó|o)n|antorcha|tienda|raci(ó|o)n|cuerda|ganz(ú|u)a/i.test(e.name)
+  );
+  const spells = data.spells?.known ?? [];
+
+  const rollSkill = (skill: string) => {
+    const ability = SKILL_ABILITY[skill.toLowerCase()] ?? "des";
+    const mod = abilityMod(totalAbility(abilities, racial, ability)) + prof;
+    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `${skill} (${ability.toUpperCase()})`);
+    onAction(`Intento usar ${skill} (${ability.toUpperCase()}, tirada ${mod >= 0 ? "+" : ""}${mod}).`);
+  };
+
+  const rollSave = (ability: Ability) => {
+    const base = abilityMod(totalAbility(abilities, racial, ability));
+    const hasProf = (data.savingThrows ?? []).includes(ability);
+    const mod = base + (hasProf ? prof : 0);
+    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `Salvación de ${ability.toUpperCase()}${hasProf ? " ✓" : ""}`);
+    onAction(`Hago una tirada de salvación de ${ability.toUpperCase()} (${mod >= 0 ? "+" : ""}${mod}).`);
+  };
+
+  const attack = (weapon: { name: string; damage?: string }) => {
+    const usesDex = /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina/i.test(weapon.name);
+    const ab = usesDex ? "des" : "fue";
+    const mod = abilityMod(totalAbility(abilities, racial, ab)) + prof;
+    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `Ataque con ${weapon.name}`);
+    onAction(`Ataco con ${weapon.name}${weapon.damage ? ` (daño ${weapon.damage})` : ""}.`);
+  };
+
+  const castSpell = (s: { name: string; level: number }) => {
+    onAction(`Lanzo el conjuro ${s.name}${s.level > 0 ? ` (nivel ${s.level})` : " (truco)"}. ¿Qué debo tirar?`);
+  };
+
+  const useItem = (name: string) => {
+    onAction(`Uso ${name}.`);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+        Cada acción tira el dado correspondiente y avisa al DM en el chat.
+      </p>
+
+      <div className="card">
+        <p className="label mb-2">Combate</p>
+        <div className="grid grid-cols-2 gap-2">
+          <ActionTile
+            label="Iniciativa"
+            subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0))}
+            onClick={() => {
+              const mod = abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0);
+              onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, "Iniciativa");
+              onAction(`Tiro iniciativa (${mod >= 0 ? "+" : ""}${mod}).`);
+            }}
+          />
+          <ActionTile
+            label="Golpe sin arma"
+            subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "fue")) + prof)}
+            onClick={() => {
+              const mod = abilityMod(totalAbility(abilities, racial, "fue")) + prof;
+              onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, "Ataque sin arma");
+              onAction("Ataco sin arma.");
+            }}
+          />
+        </div>
+      </div>
+
+      {weapons.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Armas equipadas</p>
+          <div className="grid grid-cols-1 gap-2">
+            {weapons.map((w, i) => {
+              const usesDex = /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina/i.test(w.name);
+              const ab: Ability = usesDex ? "des" : "fue";
+              const mod = abilityMod(totalAbility(abilities, racial, ab)) + prof;
+              return (
+                <ActionTile
+                  key={i}
+                  label={`Atacar con ${w.name}`}
+                  subtitle={`1d20${formatMod(mod)}${w.damage ? ` · daño ${w.damage}` : ""}`}
+                  onClick={() => attack(w)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {spells.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Conjuros</p>
+          <div className="grid grid-cols-1 gap-2">
+            {spells.map((s, i) => (
+              <ActionTile
+                key={i}
+                label={`Lanzar ${s.name}`}
+                subtitle={s.level === 0 ? "truco" : `nivel ${s.level}${s.prepared ? " · preparado" : ""}`}
+                onClick={() => castSpell(s)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <p className="label mb-2">Habilidades ({skills.length ? "proficiencia" : "sin proficiencias"})</p>
+        <div className="grid grid-cols-2 gap-2">
+          {(skills.length > 0 ? skills : Object.keys(SKILL_ABILITY).slice(0, 6)).map((s) => {
+            const ab = SKILL_ABILITY[s.toLowerCase()] ?? "sab";
+            const mod = abilityMod(totalAbility(abilities, racial, ab)) + (skills.includes(s) ? prof : 0);
+            return (
+              <ActionTile
+                key={s}
+                label={s}
+                subtitle={`${ab.toUpperCase()} ${formatMod(mod)}`}
+                onClick={() => rollSkill(s)}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <p className="label mb-2">Salvaciones</p>
+        <div className="grid grid-cols-3 gap-2">
+          {ABILITIES_ORDER.map((a) => {
+            const base = abilityMod(totalAbility(abilities, racial, a));
+            const hasProf = (data.savingThrows ?? []).includes(a);
+            const mod = base + (hasProf ? prof : 0);
+            return (
+              <ActionTile
+                key={a}
+                label={a.toUpperCase()}
+                subtitle={`${formatMod(mod)}${hasProf ? " ✓" : ""}`}
+                onClick={() => rollSave(a)}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      {consumables.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Consumibles</p>
+          <div className="grid grid-cols-2 gap-2">
+            {consumables.map((c, i) => (
+              <ActionTile
+                key={i}
+                label={c.name}
+                subtitle={c.qty > 1 ? `×${c.qty}` : "usar"}
+                onClick={() => useItem(c.name)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-center text-[11px]" style={{ color: "var(--color-text-hint)" }}>
+        Nivel {level} · Bonificador de proficiencia +{prof}
+      </p>
+    </div>
+  );
+}
+
+function DicePanel({
+  pending,
+  selected,
+  selectedLabel,
+  modifier,
+  recent,
+  data,
+  prof,
+  onSelect,
+  onModifier,
+  onRollPending,
+  onRoll,
+  onDismiss,
+}: {
+  pending: DiceRequest[];
+  selected: string;
+  selectedLabel: string;
+  modifier: number;
+  recent: DiceResult[];
+  data: CharData;
+  prof: number;
+  onSelect: (expr: string, label?: string) => void;
+  onModifier: (m: number) => void;
+  onRollPending: (r: DiceRequest) => void;
+  onRoll: () => void;
+  onDismiss: (id: string) => void;
+}) {
+  const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
+  const racial = data.abilityRacialBonus ?? {};
+  const savingThrows = data.savingThrows ?? [];
+
+  const dice = ["1d4", "1d6", "1d8", "1d10", "1d12", "1d20", "1d100", "2d6"];
+  const modifierChips = [
+    { label: "+0", v: 0 },
+    { label: "+PB", v: prof },
+    ...ABILITIES_ORDER.map((a) => ({
+      label: `+${a.toUpperCase()}`,
+      v: abilityMod(totalAbility(abilities, racial, a)),
+    })),
+    ...ABILITIES_ORDER.filter((a) => savingThrows.includes(a)).map((a) => ({
+      label: `+${a.toUpperCase()}+PB`,
+      v: abilityMod(totalAbility(abilities, racial, a)) + prof,
+    })),
+  ];
+
+  return (
+    <div className="space-y-3">
+      {pending.length > 0 && (
+        <div className="card" style={{ border: "1px solid var(--color-accent)" }}>
+          <p className="label mb-2" style={{ color: "var(--color-accent)" }}>
+            El DM pide tiradas ({pending.length})
+          </p>
+          <div className="space-y-2">
+            {pending.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded-md p-2"
+                style={{ background: "var(--color-bg-tertiary)" }}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{r.label ?? r.expression}</p>
+                  <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+                    {r.expression}
+                    {r.dc ? ` · CD ${r.dc}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button className="btn-accent" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onRollPending(r)}>
+                    Tirar
+                  </button>
+                  <button
+                    className="btn-ghost"
+                    style={{ padding: "6px 10px", fontSize: 12 }}
+                    onClick={() => onDismiss(r.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <p className="label mb-2">Dado</p>
+        <div className="grid grid-cols-4 gap-2">
+          {dice.map((d) => (
+            <button
+              key={d}
+              onClick={() => onSelect(d, "")}
+              className="rounded-md py-2 text-center text-sm"
+              style={{
+                background: selected === d ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                border: `0.5px solid ${selected === d ? "var(--color-accent)" : "var(--color-border)"}`,
+                color: selected === d ? "var(--color-accent)" : "var(--color-text-primary)",
+              }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <p className="label mb-2">Modificador</p>
+        <div className="flex flex-wrap gap-1">
+          {modifierChips.map((c) => (
+            <button
+              key={c.label}
+              onClick={() => onModifier(c.v)}
+              className="rounded-md px-2 py-1 text-xs"
+              style={{
+                background: modifier === c.v ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                border: `0.5px solid ${modifier === c.v ? "var(--color-accent)" : "var(--color-border)"}`,
+                color: modifier === c.v ? "var(--color-accent)" : "var(--color-text-secondary)",
+              }}
+            >
+              {c.label} ({formatMod(c.v)})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        className="btn-accent w-full"
+        style={{ padding: "12px", fontSize: 16 }}
+        onClick={onRoll}
+      >
+        🎲 Tirar {selected}
+        {modifier !== 0 ? formatMod(modifier) : ""}
+        {selectedLabel ? ` · ${selectedLabel}` : ""}
+      </button>
+
+      {recent.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Últimas tiradas</p>
+          <ul className="space-y-1 text-sm">
+            {recent.map((r, i) => (
+              <li key={i} className="flex items-baseline gap-2">
+                <span className="badge" style={{ fontSize: 10 }}>
+                  {r.expression}
+                </span>
+                <span style={{ color: "var(--color-text-secondary)" }}>{r.breakdown}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionTile({ label, subtitle, onClick }: { label: string; subtitle: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="card text-left" style={{ padding: "10px 12px" }}>
+      <p className="text-sm font-medium">{label}</p>
+      <p className="mt-0.5 text-[11px]" style={{ color: "var(--color-text-hint)" }}>
+        {subtitle}
+      </p>
+    </button>
+  );
+}
