@@ -106,7 +106,19 @@ export function registerSocketHandlers(io: IOServer) {
 
     socket.on(
       "dice:report",
-      (evt: { sessionId: string; by: DiceRollEvent["by"]; expression: string; total: number; rolls: number[]; requestId?: string }) => {
+      (evt: {
+        sessionId: string;
+        by: DiceRollEvent["by"];
+        expression: string;
+        total: number;
+        rolls: number[];
+        requestId?: string;
+        breakdown?: string;
+      }) => {
+        const breakdown =
+          typeof evt.breakdown === "string" && evt.breakdown.trim()
+            ? evt.breakdown.trim()
+            : `[${evt.rolls.join(", ")}] = ${evt.total} (manual)`;
         io.to(`session:${evt.sessionId}`).emit("dice:result", {
           by: evt.by,
           requestId: evt.requestId,
@@ -115,7 +127,7 @@ export function registerSocketHandlers(io: IOServer) {
             total: evt.total,
             rolls: evt.rolls,
             modifier: 0,
-            breakdown: `[${evt.rolls.join(", ")}] = ${evt.total} (manual)`,
+            breakdown,
           },
         });
       }

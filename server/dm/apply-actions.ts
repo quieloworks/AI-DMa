@@ -171,6 +171,14 @@ export function applyDmActions(sessionId: string, actions: Actions): void {
 
   const io = getIo();
   if (io) {
+    const rawRevoke = actions.dice_revoke;
+    if (Array.isArray(rawRevoke) && rawRevoke.length) {
+      const requestIds = (rawRevoke as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0);
+      if (requestIds.length) {
+        io.to(`session:${sessionId}`).emit("dice:revoke", { sessionId, requestIds });
+      }
+    }
+
     const diceRequests = Array.isArray(actions.dice_requests) ? (actions.dice_requests as Array<Record<string, unknown>>) : [];
     if (diceRequests.length) {
       const normalized = diceRequests

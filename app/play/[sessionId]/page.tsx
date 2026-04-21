@@ -14,7 +14,9 @@ export default async function PlayPage({
   const { sessionId } = await params;
   const sp = await searchParams;
   const db = getDb();
-  const session = db.prepare<string, { id: string; story_id: string }>("SELECT id, story_id FROM session WHERE id = ?").get(sessionId);
+  const session = db.prepare<string, { id: string; story_id: string; state_json: string }>(
+    "SELECT id, story_id, state_json FROM session WHERE id = ?"
+  ).get(sessionId);
   if (!session) notFound();
 
   const story = db.prepare<string, { title: string; mode: string }>("SELECT title, mode FROM story WHERE id = ?").get(session.story_id);
@@ -34,6 +36,12 @@ export default async function PlayPage({
     return { ...p, character: c ? { name: c.name, class: c.class, race: c.race, level: c.level, data: JSON.parse(c.data_json) } : null };
   });
 
+  let initialCombat = false;
+  try {
+    const st = JSON.parse(session.state_json) as { combat?: boolean };
+    initialCombat = st.combat === true;
+  } catch {}
+
   return (
     <PlayRoom
       sessionId={sessionId}
@@ -42,6 +50,7 @@ export default async function PlayPage({
       players={enriched}
       initialPlayerId={sp.p}
       initialToken={sp.t}
+      initialCombat={initialCombat}
     />
   );
 }

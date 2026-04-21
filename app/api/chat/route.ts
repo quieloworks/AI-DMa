@@ -37,6 +37,8 @@ type ChatReq = {
   playerId?: string;
   playerName?: string;
   text?: string;
+  /** Petición explícita de descripción de escena + terreno (combate); no mezclar con narrativa normal. */
+  sceneInfoRequest?: boolean;
   tone?: number;
   difficulty?: Difficulty | string;
   clientId?: string;
@@ -199,7 +201,12 @@ export async function POST(req: NextRequest) {
     turnAction = { kind: "continue", recentSignals: signals };
     retrievalQuery = signals.join(" ") || snap.summary || snap.storyTitle;
   } else {
-    turnAction = { kind: "player", playerName: body.playerName ?? "Jugador", text: body.text ?? "" };
+    turnAction = {
+      kind: "player",
+      playerName: body.playerName ?? "Jugador",
+      text: body.text ?? "",
+      sceneInfoRequest: body.sceneInfoRequest === true,
+    };
     retrievalQuery = body.text ?? "";
   }
 
@@ -270,7 +277,32 @@ export async function POST(req: NextRequest) {
             action === "player"
               ? `T${sessionRow.turn + 1} · ${body.playerName ?? "Jugador"}: ${(body.text ?? "").slice(0, 120)} → DM: ${(summaryUpdate ?? parsed.narrative.slice(0, 120)).trim()}`
               : `T${sessionRow.turn + 1} · DM: ${(summaryUpdate ?? parsed.narrative.slice(0, 120)).trim()}`;
-          nextState.recentLog = [...prevLog, logEntry].slice(-12);
+          const extraLog: string[] = [];
+          const rawDiceReq = actObj.dice_requests;
+          if (Array.isArray(rawDiceReq) && rawDiceReq.length) {
+            const bits = (rawDiceReq as Array<Record<string, unknown>>)
+              .filter((r) => typeof r.expression === "string")
+              .map((r) => {
+                const pid = typeof r.player_id === "string" ? r.player_id : "?";
+                const expr = r.expression as string;
+                const lab = typeof r.label === "string" ? r.label : "";
+                const id = typeof r.id === "string" ? r.id : "";
+                return `${lab ? `${lab}: ` : ""}${expr} → ${pid}${id ? ` [${id}]` : ""}`;
+              });
+            if (bits.length) {
+              extraLog.push(
+                `T${sessionRow.turn + 1} · Pendiente tirada (resolver antes de avanzar narrativamente): ${bits.join(" · ")}`
+              );
+            }
+          }
+          const rawRevoke = actObj.dice_revoke;
+          if (Array.isArray(rawRevoke) && rawRevoke.length) {
+            const ids = (rawRevoke as unknown[]).filter((x): x is string => typeof x === "string");
+            if (ids.length) {
+              extraLog.push(`T${sessionRow.turn + 1} · Tiradas revocadas (ya no aplican): ${ids.join(", ")}`);
+            }
+          }
+          nextState.recentLog = [...prevLog, logEntry, ...extraLog].slice(-12);
 
           if (actObj.map && typeof actObj.map === "object") {
             const hint = (actObj.map as { hint?: string }).hint;

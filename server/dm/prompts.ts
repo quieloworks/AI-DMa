@@ -71,7 +71,7 @@ export function normalizeDifficulty(raw: unknown): Difficulty {
 export type TurnAction =
   | { kind: "opening" }
   | { kind: "continue"; recentSignals?: string[] }
-  | { kind: "player"; playerName: string; text: string };
+  | { kind: "player"; playerName: string; text: string; sceneInfoRequest?: boolean };
 
 /** Límites de caracteres por chunk al inyectar RAG en el system prompt. */
 export type DmRagRenderCaps = {
@@ -269,20 +269,25 @@ const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y bat
 - INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
 - Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
 - Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
+- NARRATIVA vs TÉCNICO: en <narrativa> (salvo petición explícita "información de escena") no enumeres celdas, pies, grid ni coordenadas; eso vive en battle_map JSON y MAPEO TÁCTICO del snapshot, no hace falta leerlo en voz alta cada turno.
 - Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
 
 const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
-- Continuidad del mapa: MAPEO TÁCTICO arriba es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
+- Continuidad del mapa: MAPEO TÁCTICO del snapshot + battle_map en JSON es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
 - Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, narra y actualiza JSON.
-- Narrativa atada al mapa (obligatorio en combate): en <narrativa> ancla cada golpe, conjuro u observación en la geometría del MAPEO TÁCTICO. Di cuán cerca o lejos están los bandos (celdas y/o pies usando cellFeet del grid). Si una línea entre atacante y blanco cruza muro, tronco denso, esquina, puerta entreabierta, humo espeso, etc., narra bloqueo o limitación de visión y aplica reglas 5E (línea de efecto, objetivo a ciegas, cobertura media/tres cuartos/total según aplique). Menciona arbustos, zarzas, agua (poca o corriente), hielo, escaleras, escombros o estructuras cuando expliquen alcance cuerpo a cuerpo a distancia, terreno difícil, o ventaja posicional; si la acción declarada contradice el mapa (demasiado lejos, sin LoS, bloqueo total), narra el impedimento y no pidas tirada hasta que el jugador ajuste o se mueva.
-- Orden: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
+- NARRATIVA CINEMATOGRÁFICA (por defecto): en <narrativa> NO despliegues descripción táctica del campo salvo que EVENTOS RECIENTES indiquen que un jugador pidió información de escena/terreno, o salvo detalle mínimo imprescindible (p. ej. "no llega"). Las distancias exactas, celdas, pies, línea de visión y cobertura se mantienen en battle_map JSON; el grupo no necesita un informe técnico cada turno.
+- Si un jugador pide ver el campo (petición dedicada): entonces SÍ, en <narrativa> ofrece descripción clara de escena + terreno (distancias aproximadas, obstáculos relevantes, cobertura/visión) sin adelantar tiradas pendientes.
+- TURNOS ENEMIGOS (orden): nombra al enemigo activo y su turno. Si un hostil ataca, dilo explícitamente ("el bandido actúa y te ataca con…") antes del resultado mecánico; tras impacto, indica daño y tipo si aplica (p. ej. "8 cortante"). Si falla, dilo. No mezcles varios enemigos en un solo párrafo sin dejar claro quién pega a quién.
+- Orden de iniciativa: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
 - Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
 - Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
 - Ataques: d20 + mod + maestría (si competencia) vs CA; crítico natural 20 / pifia 1 en d20 de ataque; daño con tirada aparte. Cobertura, línea de efecto, alcance, visión a oscuras según escena y reglas.
 - Salvaciones de atributo: CD fija del efecto; ventaja/desventaja solo cuando el manual o el estado lo mande.
 - Hechizos: tiempo de lanzamiento, componentes, slots, concentración (un solo conjuro concentrado a la vez), interrupciones que dañan — todo explícito.
 - hp_changes y battle_map.participants[].hp coherentes; status_effects y participants[].status coherentes.
-- 0 HP: inconsciente; salvaciones de muerte al inicio de cada turno en 0 HP (1d20, 10+ éxito); reflejar en mapa hasta resuelto.`;
+- 0 HP: inconsciente; salvaciones de muerte al inicio de cada turno en 0 HP (1d20, 10+ éxito); reflejar en mapa hasta resuelto.
+
+- Mapeo geométrico detallado (celdas, LoS, cobertura fina): solo en petición explícita del jugador o en la sección JSON; no rellenes la narrativa habitual con jerga de tablero.`;
 
 const MECHANICAL_DIRECTIVES = `FUERA DE COMBATE: tirada+CD si hay incertidumbre; ventaja/desventaja en dice_requests como 2d20kh1 / 2d20kl1; descansos corto/largo; recompensas xp_awards, items_add, items_remove.`;
 
@@ -294,7 +299,11 @@ const SHEET_AUTHORITY_LOCKS = `CANDADOS DE FICHA (ley del juego):
 - Si el nombre es ambiguo respecto a la lista, pide una aclaración corta antes de tirar.
 - La creatividad del jugador se acoge siempre que no contradiga ficha ni fragmentos [R#]/[A#] del Handbook/módulo.`;
 
-const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO: si el éxito no es obvio (ataque, conjuro, habilidad, salvación, etc.), PARA la narración antes del desenlace, pide dice_requests por player_id (no uses "all" salvo que todos tiren lo mismo), con expression XdY+Z, label y dc si aplica. No narres éxito/fracaso hasta el siguiente turno con resultados. Si no hay tirada, dilo y resuelve. Si la acción es imposible por ficha (CANDADOS DE FICHA), no es "incertidumbre": niega sin tirada.`;
+const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO (inviolable):
+- Si el éxito no es obvio (ataque, conjuro, habilidad, salvación, iniciativa, etc.), PARA la narración antes del desenlace y emite dice_requests por player_id (cada entrada con "id" estable único en camel/snake no importa, pero reutiliza el mismo id si repites la misma petición). No uses "all" salvo que todos tiren exactamente lo mismo.
+- Mientras haya tiradas pendientes listadas en EVENTOS RECIENTES (pendiente de dados) o hayas emitido dice_requests en ESTE turno sin tener aún los resultados reales del jugador, NO adelantes la trama, NO narras desenlace del intento, NO pasas turno narrativo a otro foco salvo puras percepciones que no dependan de ese resultado. Limítate a: pedir dados, aclarar duda breve, o revocar peticiones invalidadas.
+- Si algo invalida una tirada ya pedida (acción imposible, objetivo muerto, ventana cerrada), lista esos ids en dice_revoke en <acciones> para que la interfaz las retire; no sigas esperando ese dado.
+- Si no hay tirada necesaria, dilo en una frase y resuelve. Si la acción es imposible por ficha (CANDADOS DE FICHA), no es "incertidumbre": niega sin tirada y no pidas dados.`;
 
 const FORMAT = `SALIDA (español): solo dos bloques.
 
@@ -304,7 +313,7 @@ const FORMAT = `SALIDA (español): solo dos bloques.
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico: wall|tree|bush|water|stream|rubble|door|… para cobertura/LOS/terreno en narrativa)}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{player_id,expression,label,dc?}], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico: wall|tree|bush|water|stream|rubble|door|… para cobertura/LOS/terreno en narrativa)}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
 player_id en tiradas: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
@@ -437,13 +446,20 @@ export function buildAutoDmPrompt(
   if (action.kind === "continue") {
     user = `Continúa desde el último momento narrativo.
 - Una frase resume lo que plantearon los jugadores (si hubo mensajes).
-- Avanza escena: resuelve tiradas pendientes, consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y mantén MAPEO TÁCTICO continuo (posiciones y obstáculos coherentes turno a turno).
+- Si EVENTOS RECIENTES mencionan "Pendiente tirada", tu turno solo resuelve esas tiradas (o revoca con dice_revoke) — no introduzcas nuevos giros hasta cerrarlas.
+- Avanza escena: resuelve tiradas pendientes, consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y mantén battle_map coherente en JSON (posiciones y obstáculos turno a turno); la narrativa sigue siendo cinematográfica salvo petición de escena.
 - Invita a actuar rotando foco.${action.recentSignals?.length ? `\nSeñales:\n- ${action.recentSignals.join("\n- ")}` : ""}`;
+  } else if (action.sceneInfoRequest) {
+    user = `Jugador ${action.playerName} solicita INFORMACIÓN DE ESCENA Y CAMPO (combate).
+Responde en <narrativa> SOLO con:
+- Descripción sensorial del entorno (luz, olor, sonido, temperatura, tensión).
+- Descripción táctica clara del campo: disposición aproximada, distancias útiles, obstáculos, cobertura, línea de visión, terreno difícil — usando MAPEO TÁCTICO/battle_map como referencia fiel.
+No avances el combate ni inventes acciones nuevas de enemigos ni resultados de ataque en este mensaje salvo que EVENTOS RECIENTES exijan resolver algo ineludible. Mantén <acciones> mínimas (p. ej. battle_map alineado si hace falta); no pidas dados salvo que falte información mecánica imprescindible.`;
   } else {
     user = `Jugador ${action.playerName}: ${action.text}
 
-Flujo: (1) quiénes se afectan (2) si hay incertidumbre, PARA antes del resultado, dice_requests por player_id (3) no narres éxito/fracaso hasta dados (4) si no hay tirada, explica y resuelve.
-CD y tipo explícitos. Sensorial para ${action.playerName} sin adelantar resultado de tiradas pendientes.`;
+Flujo: (1) quiénes se afectan (2) si hay incertidumbre, PARA antes del resultado, dice_requests por player_id con id estable por petición (3) no narres éxito/fracaso hasta el turno en que existan resultados (4) si no hay tirada, explica y resuelve.
+CD y tipo explícitos. Sensorial breve para ${action.playerName} sin adelantar desenlace de tiradas pendientes.`;
   }
 
   return [

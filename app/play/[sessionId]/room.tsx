@@ -95,6 +95,7 @@ export function PlayRoom({
   players,
   initialPlayerId,
   initialToken,
+  initialCombat = false,
 }: {
   sessionId: string;
   storyTitle: string;
@@ -102,6 +103,7 @@ export function PlayRoom({
   players: Player[];
   initialPlayerId?: string;
   initialToken?: string;
+  initialCombat?: boolean;
 }) {
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2) + Date.now().toString(36));
   const [picked, setPicked] = useState<Player | null>(() => {
@@ -123,6 +125,7 @@ export function PlayRoom({
   const [selectedLabel, setSelectedLabel] = useState<string>("");
   const [diceModifier, setDiceModifier] = useState<number>(0);
   const [dmThinking, setDmThinking] = useState(false);
+  const [inCombat, setInCombat] = useState(initialCombat);
   const [actionToast, setActionToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -198,6 +201,19 @@ export function PlayRoom({
       }
     );
 
+    s.on("dice:revoke", (evt: { sessionId: string; requestIds: string[] }) => {
+      if (evt.sessionId !== sessionId || !Array.isArray(evt.requestIds)) return;
+      setPendingDice((prev) => prev.filter((r) => !evt.requestIds.includes(r.id)));
+    });
+
+    s.on(
+      "scene:update",
+      (evt: { sessionId: string; combat?: boolean }) => {
+        if (evt.sessionId !== sessionId) return;
+        if (typeof evt.combat === "boolean") setInCombat(evt.combat);
+      }
+    );
+
     s.on("dice:request", (evt: { requests: Array<Omit<DiceRequest, "id"> & { id?: string }> }) => {
       const norm = evt.requests.map((r) => ({
         id: r.id ?? Math.random().toString(36).slice(2),
@@ -245,7 +261,7 @@ export function PlayRoom({
   }, []);
 
   const triggerDm = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: { sceneInfoRequest?: boolean }) => {
       if (!picked) return;
       if (storyMode !== "auto") return;
       setDmThinking(true);
@@ -260,6 +276,7 @@ export function PlayRoom({
             playerId: picked.player_id,
             playerName: picked.character?.name ?? "Jugador",
             text,
+            sceneInfoRequest: opts?.sceneInfoRequest === true,
             clientId: clientIdRef.current,
           }),
         });
@@ -286,7 +303,11 @@ export function PlayRoom({
   );
 
   const sendChat = useCallback(
-    (text: string, kind: "public" | "private" = "public", options?: { triggerDm?: boolean }) => {
+    (
+      text: string,
+      kind: "public" | "private" = "public",
+      options?: { triggerDm?: boolean; sceneInfoRequest?: boolean }
+    ) => {
       const trimmed = text.trim();
       if (!trimmed || !picked || !socket) return;
       socket.emit("chat:send", {
@@ -302,7 +323,7 @@ export function PlayRoom({
         { id: Math.random().toString(36).slice(2), from: "me", text: trimmed, kind },
       ]);
       if (options?.triggerDm && kind === "public") {
-        void triggerDm(trimmed);
+        void triggerDm(trimmed, options.sceneInfoRequest ? { sceneInfoRequest: true } : undefined);
       }
     },
     [picked, sessionId, socket, triggerDm]
@@ -348,6 +369,24 @@ export function PlayRoom({
     }
     roll(expr, selectedLabel || undefined);
   }, [selectedDice, selectedLabel, diceModifier, roll]);
+
+  const reportManualTotal = useCallback(
+    (req: DiceRequest, total: number) => {
+      if (!picked || !socket) return;
+      if (!Number.isFinite(total)) return;
+      const breakdown = `Total manual: ${total} (${req.expression}${req.label ? ` · ${req.label}` : ""})`;
+      socket.emit("dice:report", {
+        sessionId,
+        by: { role: "player", playerId: picked.player_id, label: req.label ?? "Solicitado por el DM" },
+        expression: req.expression,
+        total,
+        rolls: [total],
+        requestId: req.id,
+        breakdown,
+      });
+    },
+    [picked, sessionId, socket]
+  );
 
   if (!picked) {
     return (
@@ -437,6 +476,29 @@ export function PlayRoom({
             </button>
           ))}
         </div>
+        {inCombat && storyMode === "auto" && (
+          <div className="px-3 pb-2">
+            <button
+              type="button"
+              className="w-full rounded-md py-2 text-xs"
+              style={{
+                border: "0.5px solid var(--color-border-strong)",
+                color: "var(--color-text-secondary)",
+                background: "var(--color-bg-tertiary)",
+              }}
+              onClick={() => {
+                sendChat("Pido información de la escena y del campo de batalla (detalle táctico y sensorial).", "public", {
+                  triggerDm: true,
+                  sceneInfoRequest: true,
+                });
+                setTab("chat");
+                flashToast("Solicitud enviada al DM");
+              }}
+            >
+              Ver escena y campo de batalla
+            </button>
+          </div>
+        )}
       </header>
 
       {actionToast && (
@@ -634,6 +696,7 @@ export function PlayRoom({
               onModifier={setDiceModifier}
               onRollPending={rollPending}
               onRoll={rollSelected}
+              onReportManual={reportManualTotal}
               onDismiss={(id) => setPendingDice((prev) => prev.filter((r) => r.id !== id))}
             />
           </div>
@@ -960,6 +1023,7 @@ function DicePanel({
   onModifier,
   onRollPending,
   onRoll,
+  onReportManual,
   onDismiss,
 }: {
   pending: DiceRequest[];
@@ -973,6 +1037,7 @@ function DicePanel({
   onModifier: (m: number) => void;
   onRollPending: (r: DiceRequest) => void;
   onRoll: () => void;
+  onReportManual: (r: DiceRequest, total: number) => void;
   onDismiss: (id: string) => void;
 }) {
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
@@ -993,6 +1058,8 @@ function DicePanel({
     })),
   ];
 
+  const [manualById, setManualById] = useState<Record<string, string>>({});
+
   return (
     <div className="space-y-3">
       {pending.length > 0 && (
@@ -1004,26 +1071,71 @@ function DicePanel({
             {pending.map((r) => (
               <div
                 key={r.id}
-                className="flex items-center justify-between gap-2 rounded-md p-2"
+                className="rounded-md p-2"
                 style={{ background: "var(--color-bg-tertiary)" }}
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{r.label ?? r.expression}</p>
-                  <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    {r.expression}
-                    {r.dc ? ` · CD ${r.dc}` : ""}
-                  </p>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{r.label ?? r.expression}</p>
+                    <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+                      {r.expression}
+                      {r.dc ? ` · CD ${r.dc}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button className="btn-accent" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onRollPending(r)}>
+                      Tirar
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      style={{ padding: "6px 10px", fontSize: 12 }}
+                      onClick={() => onDismiss(r.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <button className="btn-accent" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onRollPending(r)}>
-                    Tirar
-                  </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="input flex-1"
+                    style={{ height: 36, fontSize: 13 }}
+                    placeholder="Total (dado físico o manual)"
+                    value={manualById[r.id] ?? ""}
+                    onChange={(e) => setManualById((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const raw = (manualById[r.id] ?? "").trim().replace(",", ".");
+                        const n = parseInt(raw, 10);
+                        if (!Number.isFinite(n)) return;
+                        onReportManual(r, n);
+                        setManualById((prev) => {
+                          const next = { ...prev };
+                          delete next[r.id];
+                          return next;
+                        });
+                      }
+                    }}
+                  />
                   <button
-                    className="btn-ghost"
+                    type="button"
+                    className="btn-ghost shrink-0"
                     style={{ padding: "6px 10px", fontSize: 12 }}
-                    onClick={() => onDismiss(r.id)}
+                    onClick={() => {
+                      const raw = (manualById[r.id] ?? "").trim().replace(",", ".");
+                      const n = parseInt(raw, 10);
+                      if (!Number.isFinite(n)) return;
+                      onReportManual(r, n);
+                      setManualById((prev) => {
+                        const next = { ...prev };
+                        delete next[r.id];
+                        return next;
+                      });
+                    }}
                   >
-                    ✕
+                    Registrar
                   </button>
                 </div>
               </div>
