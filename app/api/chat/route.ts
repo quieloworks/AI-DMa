@@ -186,18 +186,19 @@ export async function POST(req: NextRequest) {
     turnAction = { kind: "opening" };
     retrievalQuery = `inicio aventura ${snap.storyTitle} ${snap.seed ?? ""} ${players.map((p) => `${p.race} ${p.class}`).join(" ")}`;
   } else if (action === "continue") {
+    /** kind=public: mensajes de jugador, tiradas persistidas (🎲), y narrativa del DM en modo automático. */
     const recent = db
       .prepare<
-        [string, string],
+        [string],
         { role: string; content: string }
       >(
-        `SELECT role, content FROM session_message WHERE session_id = ? AND kind = ? ORDER BY id DESC LIMIT 8`
+        `SELECT role, content FROM session_message WHERE session_id = ? AND kind = 'public' ORDER BY id DESC LIMIT 20`
       )
-      .all(body.sessionId, body.mode === "assistant" ? "dm-assistant" : "public")
+      .all(body.sessionId)
       .reverse();
     const signals = recent
       .filter((m) => m.role === "player")
-      .map((m) => m.content.slice(0, 200));
+      .map((m) => m.content.slice(0, 280));
     turnAction = { kind: "continue", recentSignals: signals };
     retrievalQuery = signals.join(" ") || snap.summary || snap.storyTitle;
   } else {

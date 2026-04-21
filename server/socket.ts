@@ -1,6 +1,6 @@
 import type { Server as IOServer, Socket } from "socket.io";
 import { getDb } from "@/lib/db";
-import { rollExpression } from "./dice";
+import { rollExpression, type DiceResult } from "./dice";
 
 type JoinPayload = { sessionId: string; role: "dm" | "player"; playerId?: string; token?: string; name?: string };
 
@@ -34,6 +34,28 @@ type CharacterUpdate = {
   characterId: string;
   patch: Record<string, unknown>;
 };
+
+/** Guarda la tirada en la crónica para que el DM la vea al usar “continuar” (el API solo lee session_message). */
+function persistDiceRollChronicle(
+  sessionId: string,
+  by: DiceRollEvent["by"],
+  result: DiceResult,
+  requestId?: string
+) {
+  if (by.role !== "player" || !sessionId) return;
+  const label = by.label?.trim();
+  const req = requestId ? ` [petición ${requestId}]` : "";
+  const text = `🎲 Tirada: ${result.expression}${label ? ` (${label})` : ""}${req} → ${result.breakdown}. Total ${result.total}.`;
+  try {
+    getDb()
+      .prepare(
+        `INSERT INTO session_message(session_id, role, player_id, kind, content, created_at) VALUES(?, 'player', ?, 'public', ?, ?)`
+      )
+      .run(sessionId, by.playerId ?? null, text, Date.now());
+  } catch (err) {
+    console.warn("persistDiceRollChronicle:", (err as Error).message);
+  }
+}
 
 export function registerSocketHandlers(io: IOServer) {
   io.on("connection", (socket: Socket) => {
@@ -98,6 +120,7 @@ export function registerSocketHandlers(io: IOServer) {
     socket.on("dice:roll", (evt: DiceRollEvent) => {
       try {
         const result = rollExpression(evt.expression);
+        persistDiceRollChronicle(evt.sessionId, evt.by, result, evt.requestId);
         io.to(`session:${evt.sessionId}`).emit("dice:result", { by: evt.by, result, requestId: evt.requestId });
       } catch (err) {
         socket.emit("dice:error", { message: (err as Error).message });
@@ -119,16 +142,18 @@ export function registerSocketHandlers(io: IOServer) {
           typeof evt.breakdown === "string" && evt.breakdown.trim()
             ? evt.breakdown.trim()
             : `[${evt.rolls.join(", ")}] = ${evt.total} (manual)`;
+        const result: DiceResult = {
+          expression: evt.expression,
+          total: evt.total,
+          rolls: evt.rolls,
+          modifier: 0,
+          breakdown,
+        };
+        persistDiceRollChronicle(evt.sessionId, evt.by, result, evt.requestId);
         io.to(`session:${evt.sessionId}`).emit("dice:result", {
           by: evt.by,
           requestId: evt.requestId,
-          result: {
-            expression: evt.expression,
-            total: evt.total,
-            rolls: evt.rolls,
-            modifier: 0,
-            breakdown,
-          },
+          result,
         });
       }
     );

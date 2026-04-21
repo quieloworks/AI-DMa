@@ -446,9 +446,10 @@ export function buildAutoDmPrompt(
   if (action.kind === "continue") {
     user = `Continúa desde el último momento narrativo.
 - Una frase resume lo que plantearon los jugadores (si hubo mensajes).
-- Si EVENTOS RECIENTES mencionan "Pendiente tirada", tu turno solo resuelve esas tiradas (o revoca con dice_revoke) — no introduzcas nuevos giros hasta cerrarlas.
-- Avanza escena: resuelve tiradas pendientes, consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y mantén battle_map coherente en JSON (posiciones y obstáculos turno a turno); la narrativa sigue siendo cinematográfica salvo petición de escena.
-- Invita a actuar rotando foco.${action.recentSignals?.length ? `\nSeñales:\n- ${action.recentSignals.join("\n- ")}` : ""}`;
+- TIRADAS (crítico): en el bloque "Señales recientes" pueden aparecer líneas que empiezan con 🎲 o "Tirada:" — son resultados **ya obtenidos** del jugador en la crónica. Debes resolver ese desenlace mecánico y narrativo ahora; **no vuelvas a pedir la misma tirada** ni repitas el mismo bloque de petición de dados si ya hay resultado explícito aquí abajo. Si algo invalidó la tirada, usa dice_revoke.
+- Si EVENTOS RECIENTES (arriba en el system) mencionan "Pendiente tirada" sin resultado en Señales, sigue esperando dados o revoca.
+- Avanza escena: consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y battle_map en JSON; narrativa cinematográfica salvo petición de escena.
+- Invita a actuar rotando foco.${action.recentSignals?.length ? `\nSeñales recientes (incluye tiradas resueltas):\n- ${action.recentSignals.join("\n- ")}` : ""}`;
   } else if (action.sceneInfoRequest) {
     user = `Jugador ${action.playerName} solicita INFORMACIÓN DE ESCENA Y CAMPO (combate).
 Responde en <narrativa> SOLO con:
