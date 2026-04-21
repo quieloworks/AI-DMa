@@ -507,6 +507,33 @@ export function StoryRoom({
       return;
     }
 
+    if (story.mode === "auto" && whisperTo === "all") {
+      const first = players[0];
+      if (!socket || !first?.playerId) {
+        setInput(text);
+        return;
+      }
+      socket.emit("chat:send", {
+        sessionId,
+        role: "player",
+        playerId: first.playerId,
+        kind: "public",
+        text,
+        clientId: clientIdRef.current,
+      });
+      setChat((prev) => [
+        ...prev,
+        {
+          id: randomId(),
+          role: "player",
+          text,
+          playerName: first.character?.name ?? "Jugador",
+          kind: "public",
+        },
+      ]);
+      return;
+    }
+
     const playerPid = players[0]?.playerId;
     const playerName = players[0]?.character?.name ?? "Jugador";
     await runDm({ action: "player", text, playerId: playerPid, playerName, showPlayer: true });
@@ -985,7 +1012,7 @@ export function StoryRoom({
                 className="btn-ghost"
                 style={{ flex: 1 }}
                 disabled={streaming}
-                title="El DM retoma la narrativa con lo que han dicho los jugadores"
+                title="Genera la siguiente narrativa usando el chat del grupo (acciones y tiradas ya publicadas)"
               >
                 ▶ Continuar historia
               </button>

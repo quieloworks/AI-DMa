@@ -349,7 +349,7 @@ export function PlayRoom({
     (kind: "public" | "private" = "public") => {
       if (!input.trim()) return;
       const effectiveKind = tab === "chat" && chatSubTab === "private" ? "private" : kind;
-      sendChat(input, effectiveKind, { triggerDm: effectiveKind === "public" });
+      sendChat(input, effectiveKind);
       setInput("");
     },
     [input, sendChat, tab, chatSubTab]
@@ -487,12 +487,12 @@ export function PlayRoom({
                 background: "var(--color-bg-tertiary)",
               }}
               onClick={() => {
-                sendChat("Pido información de la escena y del campo de batalla (detalle táctico y sensorial).", "public", {
-                  triggerDm: true,
-                  sceneInfoRequest: true,
-                });
+                sendChat(
+                  "Pido información de la escena y del campo de batalla (detalle táctico y sensorial).",
+                  "public"
+                );
                 setTab("chat");
-                flashToast("Solicitud enviada al DM");
+                flashToast("Mensaje al grupo; el narrador puede pulsar «Continuar historia» cuando toque");
               }}
             >
               Ver escena y campo de batalla
@@ -531,7 +531,7 @@ export function PlayRoom({
               level={level}
               prof={prof}
               onAction={(text) => {
-                sendChat(text, "public", { triggerDm: true });
+                sendChat(text, "public");
                 flashToast(text);
                 setTab("chat");
               }}
@@ -622,7 +622,7 @@ export function PlayRoom({
                     className="input"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Mensaje al grupo (el DM lo usa para narrar)…"
+                    placeholder="Mensaje al grupo (el narrador continúa con «Continuar historia»)…"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -889,7 +889,7 @@ function ActionsPanel({
   return (
     <div className="space-y-3">
       <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-        Cada acción avisa al DM en el chat. Si pide una tirada, usa la sección dados o reporta el resultado (dado físico); no se lanza solo al pulsar.
+        Cada acción queda en el chat del grupo; el narrador usa «Continuar historia» en su pantalla cuando todos hayan actuado. Si el DM pide tirada, usa la sección dados o el total manual.
       </p>
 
       <div className="card">
