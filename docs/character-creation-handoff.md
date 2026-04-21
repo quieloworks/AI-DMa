@@ -6,7 +6,7 @@
 
 ## Pendiente
 
-1. **Catálogo `SPELLS`** — añadir conjuros puntuales o niveles altos cuando la mesa los pida; no hace falta duplicar el PHB entero en código si no se usan.
+_No bloqueante._ Si en mesa falta un conjuro concreto del PHB, añadirlo en `lib/spells.ts` (id kebab-case, nombre en ES, `classes` / nivel / escuela según el Manual del Jugador).
 
 ---
 
@@ -14,8 +14,8 @@
 
 | Área | Archivo |
 | --- | --- |
-| Personaje / PG / ASI / lista efectiva de conjuros | `lib/character.ts` (`effectiveSpellKnownForCharacter`, …) |
-| Catálogo y fusión repertorio preparados | `lib/spells.ts` (`mergePreparedCasterKnownWithCatalog`, …) |
+| Personaje / PG / ASI / lista efectiva de conjuros | `lib/character.ts` |
+| Catálogo y fusión repertorio preparados | `lib/spells.ts` |
 | Herramientas PHB | `lib/tools.ts` |
 | Pasivas / estilos (no CA) | `lib/rules-engine.ts` |
 | Wizard | `app/character/new/wizard.tsx` |
@@ -34,7 +34,8 @@ npx tsc --noEmit && npm run dev
 
 ## Historial
 
-- **2026-04-21 (IX)**: **Ampliación nv. 2 PHB** en `lib/spells.ts`: Auxilio, Augurio, Llama eterna, Reposo gentil, Sugestión (individual), Oscuridad, Paso brumoso, Agrandar/reducir, Calmar emociones, Calentar metal, Mensajero de los animales, Hoja de llamas, Ráfaga de viento — clases según PHB 5e (Manual del Jugador).
+- **2026-04-21 (X)**: **Ampliación nv. 3 PHB** en `lib/spells.ts`: Acelerar, Lentitud, Crear comida y agua, Fingir muerte, Palabra de curación en masa, Lenguas, Muro de viento, Clarividencia — clases según PHB 5e.
+- **2026-04-21 (IX)**: Ampliación nv. 2 PHB (Auxilio, Augurio, Oscuridad, Paso brumoso, etc.).
 - **2026-04-21 (VIII)**: Preparados PHB — repertorio completo en ficha + `PATCH` de hidratación.
 - **2026-04-21 (VII)**: PG rolados y `hp.levelUpRolls`.
 - **2026-04-21 (VI–I)**: `asiChoices`, CA, herramientas, etc.

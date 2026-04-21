@@ -1,4 +1,4 @@
-// Catálogo curado de trucos y conjuros de nivel 1 del PHB 5E (cap. 11).
+// Catálogo curado de trucos y conjuros del PHB 5E (cap. 11); niveles 0–9 por bloques.
 // Cubre las seis clases lanzadoras principales (bardo, clérigo, druida, hechicero, brujo, mago)
 // más paladín y explorador donde aplique. Los nombres siguen la nomenclatura en español del PHB;
 // los ids usan kebab-case sin acentos para ser estables.
