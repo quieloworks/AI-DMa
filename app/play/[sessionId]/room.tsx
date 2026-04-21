@@ -229,7 +229,7 @@ export function PlayRoom({
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat, tab]);
+  }, [chat, tab, chatSubTab]);
 
   const hp = currentData.hp ?? { current: 0, max: 0, temp: 0 };
   const ac = currentData.ac ?? 10;
@@ -321,13 +321,17 @@ export function PlayRoom({
     [picked, sessionId, socket]
   );
 
+  const groupChat = useMemo(() => chat.filter((m) => m.kind === "public"), [chat]);
+  const privateChat = useMemo(() => chat.filter((m) => m.kind === "private"), [chat]);
+
   const handleSendInput = useCallback(
     (kind: "public" | "private" = "public") => {
       if (!input.trim()) return;
-      sendChat(input, kind, { triggerDm: kind === "public" });
+      const effectiveKind = tab === "chat" && chatSubTab === "private" ? "private" : kind;
+      sendChat(input, effectiveKind, { triggerDm: effectiveKind === "public" });
       setInput("");
     },
-    [input, sendChat]
+    [input, sendChat, tab, chatSubTab]
   );
 
   const rollPending = useCallback(
@@ -475,20 +479,73 @@ export function PlayRoom({
 
         {tab === "chat" && (
           <div className="flex h-full flex-col">
+            <div
+              className="flex shrink-0 gap-1 px-3 pt-2"
+              style={{ borderBottom: "0.5px solid var(--color-border)" }}
+            >
+              <button
+                type="button"
+                onClick={() => setChatSubTab("group")}
+                className="flex-1 rounded-md px-2 py-1.5 text-xs"
+                style={{
+                  color: chatSubTab === "group" ? "var(--color-accent)" : "var(--color-text-hint)",
+                  background: chatSubTab === "group" ? "var(--color-accent-bg)" : "transparent",
+                }}
+              >
+                Grupo
+                {groupChat.length > 0 && (
+                  <span className="ml-1 opacity-70" style={{ fontSize: 10 }}>
+                    ({groupChat.length})
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setChatSubTab("private")}
+                className="flex-1 rounded-md px-2 py-1.5 text-xs"
+                style={{
+                  color: chatSubTab === "private" ? "var(--color-accent)" : "var(--color-text-hint)",
+                  background: chatSubTab === "private" ? "var(--color-accent-bg)" : "transparent",
+                }}
+              >
+                Contigo (privado)
+                {privateChat.length > 0 && (
+                  <span className="ml-1 opacity-70" style={{ fontSize: 10 }}>
+                    ({privateChat.length})
+                  </span>
+                )}
+              </button>
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
               <div className="space-y-2">
-                {chat.length === 0 && (
-                  <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-                    Aún no hay mensajes. Escribe al DM lo que quieres hacer.
-                  </p>
+                {chatSubTab === "group" && (
+                  <>
+                    {groupChat.length === 0 && (
+                      <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                        Aquí va la narración del DM y lo que dices en voz alta al grupo.
+                      </p>
+                    )}
+                    {groupChat.map((m) => (
+                      <ChatItem key={m.id} m={m} />
+                    ))}
+                    {dmThinking && (
+                      <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                        el DM está pensando…
+                      </p>
+                    )}
+                  </>
                 )}
-                {chat.map((m) => (
-                  <ChatItem key={m.id} m={m} />
-                ))}
-                {dmThinking && (
-                  <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-                    el DM está pensando…
-                  </p>
+                {chatSubTab === "private" && (
+                  <>
+                    {privateChat.length === 0 && (
+                      <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                        Solo tú y el DM ven los susurros. No forman parte de la narración del grupo.
+                      </p>
+                    )}
+                    {privateChat.map((m) => (
+                      <ChatItem key={m.id} m={m} />
+                    ))}
+                  </>
                 )}
                 <div ref={chatEnd} />
               </div>
@@ -497,31 +554,65 @@ export function PlayRoom({
               className="shrink-0 px-3 py-2"
               style={{ borderTop: "0.5px solid var(--color-border)", background: "var(--color-bg-primary)" }}
             >
-              <div className="flex items-center gap-2">
-                <input
-                  className="input"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Mensaje al DM…"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSendInput("public");
-                    }
-                  }}
-                />
-                <button
-                  className="btn-ghost"
-                  onClick={() => handleSendInput("private")}
-                  title="Enviar privado al DM"
-                  style={{ padding: "0 10px" }}
-                >
-                  🔒
-                </button>
-                <button className="btn-accent" onClick={() => handleSendInput("public")} disabled={!input.trim()}>
-                  ↑
-                </button>
-              </div>
+              {chatSubTab === "group" ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    className="input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Mensaje al grupo (el DM lo usa para narrar)…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSendInput("public");
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn-ghost"
+                    onClick={() => handleSendInput("private")}
+                    title="Enviar privado al DM (no es narración del grupo)"
+                    style={{ padding: "0 10px" }}
+                  >
+                    🔒
+                  </button>
+                  <button className="btn-accent" onClick={() => handleSendInput("public")} disabled={!input.trim()}>
+                    ↑
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    className="input w-full"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Susurro solo al DM…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSendInput("private");
+                      }
+                    }}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="text-xs"
+                      style={{ color: "var(--color-text-hint)" }}
+                      onClick={() => setChatSubTab("group")}
+                    >
+                      ← Volver al chat del grupo
+                    </button>
+                    <button
+                      className="btn-accent"
+                      onClick={() => handleSendInput("private")}
+                      disabled={!input.trim()}
+                    >
+                      Enviar privado
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
