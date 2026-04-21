@@ -51,6 +51,15 @@ type ChatBubble = {
   kind?: "public" | "private";
 };
 
+type AdventureIngest = {
+  status: "pending" | "running" | "done" | "error";
+  phase?: "extracting" | "embedding" | "summarizing" | "done" | "error";
+  done?: number;
+  total?: number;
+  error?: string;
+  fileName?: string;
+};
+
 type InitialState = {
   sceneTags?: string[];
   sceneImage?: string;
@@ -61,6 +70,7 @@ type InitialState = {
   autoSpeak?: boolean;
   combat?: boolean;
   battleMap?: BattleMap | null;
+  adventureIngest?: AdventureIngest;
 };
 
 function randomId() {
@@ -121,6 +131,7 @@ export function StoryRoom({
   );
   const [difficulty, setDifficulty] = useState<Difficulty>(() => normalizeDifficulty(initialState.difficulty));
   const [openingDone, setOpeningDone] = useState<boolean>(initialState.openingDone === true);
+  const [ingest, setIngest] = useState<AdventureIngest | null>(initialState.adventureIngest ?? null);
   const [whisperTo, setWhisperTo] = useState<string>("all");
   const [autoSpeak, setAutoSpeak] = useState<boolean>(initialState.autoSpeak === true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -396,15 +407,38 @@ export function StoryRoom({
     [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText, combat]
   );
 
+  const ingestActive = !!ingest && ingest.status !== "done" && ingest.status !== "error";
+
+  useEffect(() => {
+    if (!ingestActive) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/session/${sessionId}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { state?: { adventureIngest?: AdventureIngest } };
+        if (cancelled) return;
+        if (data.state?.adventureIngest) setIngest(data.state.adventureIngest);
+      } catch {}
+    };
+    const id = setInterval(tick, 2000);
+    void tick();
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [ingestActive, sessionId]);
+
   useEffect(() => {
     if (openingAttempted.current) return;
     if (story.mode !== "auto") return;
     if (openingDone) return;
+    if (ingestActive) return;
     const hasDmMsg = chat.some((m) => m.role === "dm" && m.text.trim().length > 0);
     if (hasDmMsg) return;
     openingAttempted.current = true;
     void runDm({ action: "opening" });
-  }, [chat, openingDone, runDm, story.mode]);
+  }, [chat, openingDone, runDm, story.mode, ingestActive]);
 
   async function send() {
     if (!input.trim() || streaming) return;
@@ -592,6 +626,8 @@ export function StoryRoom({
             </button>
           </div>
         </div>
+
+        {ingest && <AdventureIngestBanner ingest={ingest} />}
 
         {showQr && <QrPanel sessionId={sessionId} players={players} />}
 
@@ -1146,6 +1182,81 @@ function DmBubble({
       <p className="text-sm" style={{ fontFamily: "var(--font-display)", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
         {text}
       </p>
+    </div>
+  );
+}
+
+function AdventureIngestBanner({ ingest }: { ingest: AdventureIngest }) {
+  const phaseLabel: Record<NonNullable<AdventureIngest["phase"]>, string> = {
+    extracting: "Leyendo PDF",
+    embedding: "Indexando fragmentos",
+    summarizing: "Redactando esquema de la aventura",
+    done: "Aventura lista",
+    error: "Error",
+  };
+  const phase = ingest.phase ?? (ingest.status === "done" ? "done" : "extracting");
+  const label = phaseLabel[phase];
+  const total = ingest.total ?? 0;
+  const done = ingest.done ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : phase === "done" ? 100 : 5;
+
+  const isError = ingest.status === "error";
+  const isDone = ingest.status === "done";
+  const accent = isError
+    ? "hsl(0,70%,55%)"
+    : isDone
+      ? "hsl(150,55%,55%)"
+      : "var(--color-accent)";
+
+  return (
+    <div
+      className="rounded-lg px-4 py-3"
+      style={{
+        border: `0.5px solid ${isError ? "rgba(216,90,48,0.45)" : "var(--color-border)"}`,
+        background: isError ? "rgba(216,90,48,0.12)" : "var(--color-bg-secondary)",
+        animation: "fadeUp 0.3s ease both",
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="label" style={{ color: accent }}>
+            {isDone ? "📘 Módulo cargado" : isError ? "⚠ Fallo al ingerir" : "📖 Ingestando tu módulo"}
+          </p>
+          <p className="mt-1 text-sm truncate" style={{ color: "var(--color-text-secondary)" }}>
+            {ingest.fileName ? <span>{ingest.fileName} · </span> : null}
+            {isError
+              ? ingest.error ?? "Ocurrió un error."
+              : isDone
+                ? "El DM usará esta aventura como verdad oficial durante toda la partida."
+                : `${label}${total > 0 ? ` · ${done}/${total}` : ""}`}
+          </p>
+        </div>
+        {!isDone && !isError && (
+          <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+            {pct}%
+          </span>
+        )}
+      </div>
+      {!isDone && !isError && (
+        <div
+          className="mt-2 h-1 overflow-hidden rounded-full"
+          style={{ background: "var(--color-bg-tertiary)" }}
+        >
+          <div
+            style={{
+              width: `${pct}%`,
+              height: "100%",
+              background: accent,
+              transition: "width 0.3s ease",
+            }}
+          />
+        </div>
+      )}
+      {!isDone && !isError && (
+        <p className="mt-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+          El DM esperará a terminar la ingesta antes de abrir la aventura.
+        </p>
+      )}
     </div>
   );
 }

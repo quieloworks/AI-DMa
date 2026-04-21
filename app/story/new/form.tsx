@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type CharacterOpt = { id: string; name: string; class: string | null; race: string | null; level: number };
@@ -12,51 +12,172 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
   const [mode, setMode] = useState<"auto" | "assistant">("auto");
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [pdf, setPdf] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function submit() {
     if (!title || picked.length === 0) return;
     setBusy(true);
-    const res = await fetch("/api/story", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, mode, seed, playerCharacterIds: picked }),
-    });
-    const data = (await res.json()) as { sessionId: string };
-    router.push(`/story/${data.sessionId}`);
+    setError(null);
+    try {
+      let res: Response;
+      if (pdf) {
+        const fd = new FormData();
+        fd.set("title", title);
+        fd.set("mode", mode);
+        fd.set("seed", seed);
+        fd.set("playerCharacterIds", JSON.stringify(picked));
+        fd.set("adventurePdf", pdf);
+        res = await fetch("/api/story", { method: "POST", body: fd });
+      } else {
+        res = await fetch("/api/story", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, mode, seed, playerCharacterIds: picked }),
+        });
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `Error ${res.status}`);
+      }
+      const data = (await res.json()) as { sessionId: string };
+      router.push(`/story/${data.sessionId}`);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
   }
 
-  const toggle = (id: string) => setPicked((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  const toggle = (id: string) =>
+    setPicked((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+
+  function onPickFile(file: File | null) {
+    if (!file) {
+      setPdf(null);
+      return;
+    }
+    if (file.type && file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("El archivo debe ser un PDF.");
+      return;
+    }
+    if (file.size > 40 * 1024 * 1024) {
+      setError("El PDF es demasiado grande (máx 40 MB).");
+      return;
+    }
+    setError(null);
+    setPdf(file);
+  }
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.5fr_1fr]">
       <div className="card space-y-4">
         <label className="block">
           <span className="label">Título</span>
-          <input className="input mt-2" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej: Las ruinas de Astarel" />
+          <input
+            className="input mt-2"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Ej: Las ruinas de Astarel"
+          />
         </label>
 
         <div>
           <span className="label">Modo del Dungeon Master</span>
           <div className="mt-2 flex gap-2">
-            <button type="button" onClick={() => setMode("auto")} className={mode === "auto" ? "btn-accent" : "btn-ghost"}>
+            <button
+              type="button"
+              onClick={() => setMode("auto")}
+              className={mode === "auto" ? "btn-accent" : "btn-ghost"}
+            >
               Automático (IA narra todo)
             </button>
-            <button type="button" onClick={() => setMode("assistant")} className={mode === "assistant" ? "btn-accent" : "btn-ghost"}>
+            <button
+              type="button"
+              onClick={() => setMode("assistant")}
+              className={mode === "assistant" ? "btn-accent" : "btn-ghost"}
+            >
               Asistente (un jugador es DM)
             </button>
           </div>
         </div>
 
+        <div>
+          <span className="label">Aventura escrita (PDF · opcional)</span>
+          <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+            Si subes un módulo, el DM lo ingesta al empezar y lo usa como verdad oficial. Solo improvisa cuando el
+            archivo no cubra la situación.
+          </p>
+          <div
+            className="mt-2 rounded-md px-3 py-3"
+            style={{
+              border: `0.5px dashed ${pdf ? "var(--color-accent)" : "var(--color-border-strong)"}`,
+              background: pdf ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+            }}
+          >
+            {pdf ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{pdf.name}</p>
+                  <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+                    {(pdf.size / 1024 / 1024).toFixed(2)} MB · se ingesta al crear la historia
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  onClick={() => {
+                    setPdf(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                >
+                  Quitar
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-start gap-2">
+                <label className="btn-ghost cursor-pointer" style={{ fontSize: 13 }}>
+                  📄 Subir PDF de la aventura
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+                  Máx 40 MB · el DM usará el módulo como source of truth.
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
         <label className="block">
-          <span className="label">Semilla / idea de la historia</span>
+          <span className="label">Semilla / idea de la historia {pdf && <span style={{ color: "var(--color-text-hint)" }}>· opcional si subes un PDF</span>}</span>
           <textarea
             className="input mt-2"
             style={{ height: 120, padding: 10 }}
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
-            placeholder="Un grupo de aventureros despierta en una mazmorra sin recordar cómo llegaron. Escuchan gruñidos lejanos..."
+            placeholder={
+              pdf
+                ? "Opcional: notas extra para el DM (ej. 'empieza en el capítulo 2', 'los PCs ya se conocen')."
+                : "Un grupo de aventureros despierta en una mazmorra sin recordar cómo llegaron. Escuchan gruñidos lejanos..."
+            }
           />
         </label>
+
+        {error && (
+          <p
+            className="rounded-md px-3 py-2 text-xs"
+            style={{ background: "rgba(216,90,48,0.15)", color: "#f4a582" }}
+          >
+            {error}
+          </p>
+        )}
       </div>
 
       <div className="card">
@@ -69,7 +190,12 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
           <ul className="space-y-2">
             {characters.map((c) => (
               <li key={c.id}>
-                <label className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: picked.includes(c.id) ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)" }}>
+                <label
+                  className="flex items-center justify-between rounded-md px-3 py-2"
+                  style={{
+                    background: picked.includes(c.id) ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                  }}
+                >
                   <div>
                     <p className="text-sm">{c.name}</p>
                     <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
@@ -83,8 +209,12 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
           </ul>
         )}
 
-        <button disabled={busy || !title || picked.length === 0} onClick={submit} className="btn-accent mt-6 w-full">
-          {busy ? "Creando…" : "Comenzar la aventura"}
+        <button
+          disabled={busy || !title || picked.length === 0}
+          onClick={submit}
+          className="btn-accent mt-6 w-full"
+        >
+          {busy ? (pdf ? "Subiendo e ingestando…" : "Creando…") : pdf ? "Ingestar PDF y comenzar" : "Comenzar la aventura"}
         </button>
       </div>
     </div>

@@ -11,6 +11,7 @@ import {
   type TurnAction,
 } from "@/server/dm/prompts";
 import { retrieveRules } from "@/server/rag";
+import { retrieveAdventure, getAdventureOutline, hasAdventure } from "@/server/adventure";
 import { applyDmActions } from "@/server/dm/apply-actions";
 import { getIo } from "@/server/io-bus";
 
@@ -40,8 +41,8 @@ export async function POST(req: NextRequest) {
   if (!sessionRow) return new Response("Sesión no existe", { status: 404 });
 
   const storyRow = db
-    .prepare<string, { title: string; summary: string | null; data_json: string }>(
-      "SELECT title, summary, data_json FROM story WHERE id = ?"
+    .prepare<string, { title: string; summary: string | null; data_json: string; source_pdf: string | null }>(
+      "SELECT title, summary, data_json, source_pdf FROM story WHERE id = ?"
     )
     .get(sessionRow.story_id);
 
@@ -121,7 +122,12 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  const storyData = storyRow?.data_json ? (JSON.parse(storyRow.data_json) as { seed?: string }) : {};
+  const storyData = storyRow?.data_json
+    ? (JSON.parse(storyRow.data_json) as { seed?: string; sourceFileName?: string | null })
+    : {};
+  const storyId = sessionRow.story_id;
+  const adventureLoaded = Boolean(storyRow?.source_pdf) && hasAdventure(storyId);
+  const adventureOutline = adventureLoaded ? getAdventureOutline(storyId) : null;
 
   const snap: SessionSnapshot = {
     storyTitle: storyRow?.title ?? "Aventura",
@@ -135,6 +141,8 @@ export async function POST(req: NextRequest) {
     initiative: state.initiative,
     openingDone: state.openingDone,
     seed: storyData.seed,
+    adventureOutline,
+    adventureSourceName: storyData.sourceFileName ?? null,
   };
 
   const action: ChatReq["action"] = body.action ?? (body.text && body.text.trim() ? "player" : "continue");
@@ -165,6 +173,15 @@ export async function POST(req: NextRequest) {
   }
 
   const rulesCtx = await retrieveRules(retrievalQuery || snap.storyTitle, { k: 5 });
+
+  if (adventureLoaded) {
+    try {
+      const advChunks = await retrieveAdventure(storyId, retrievalQuery || snap.storyTitle, { k: 6 });
+      snap.adventureChunks = advChunks;
+    } catch (err) {
+      console.warn("retrieveAdventure:", (err as Error).message);
+    }
+  }
 
   const messages =
     body.mode === "auto"

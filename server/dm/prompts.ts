@@ -1,4 +1,5 @@
 import type { RetrievedChunk } from "../rag";
+import type { AdventureChunk } from "../adventure";
 
 export type SessionSnapshot = {
   storyTitle: string;
@@ -26,6 +27,9 @@ export type SessionSnapshot = {
   initiative?: Array<{ player_id: string; value: number }>;
   openingDone?: boolean;
   seed?: string;
+  adventureOutline?: string | null;
+  adventureChunks?: AdventureChunk[];
+  adventureSourceName?: string | null;
 };
 
 export type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -46,6 +50,16 @@ function renderRulesContext(chunks: RetrievedChunk[]): string {
   if (!chunks.length) return "(sin reglas recuperadas)";
   return chunks
     .map((c, i) => `[R${i + 1} · ${c.section}${c.subsection ? " / " + c.subsection : ""} · p.${c.page}]\n${c.text.slice(0, 900)}`)
+    .join("\n\n");
+}
+
+function renderAdventureChunks(chunks: AdventureChunk[] | undefined): string {
+  if (!chunks || !chunks.length) return "(sin fragmentos recuperados)";
+  return chunks
+    .map(
+      (c, i) =>
+        `[A${i + 1}${c.subsection ? " · " + c.subsection.slice(0, 80) : ""} · p.${c.page}]\n${c.text.slice(0, 1200)}`
+    )
     .join("\n\n");
 }
 
@@ -231,10 +245,33 @@ REGLAS DEL FORMATO:
 - "player_id" acepta el id literal de cada jugador (mostrado arriba en JUGADORES), "all" para todos, o "npc:nombre" para criaturas.
 - Omite campos vacíos en lugar de mandar arrays/objetos vacíos.`;
 
+const ADVENTURE_DIRECTIVE = `MÓDULO CARGADO (SOURCE OF TRUTH):
+- El usuario cargó un PDF con la aventura escrita. Lo que ese módulo dice es CANON.
+- Dirige la partida según el módulo: respeta ubicaciones, NPCs, encuentros, tesoros, secretos y ritmo tal como aparecen.
+- Solo improvisa cuando el módulo NO cubra una situación (acción creativa del jugador, detalle menor no escrito, reacción de un NPC fuera de guion). En ese caso, mantén tono, lógica y continuidad del módulo.
+- NO inventes nombres, monstruos, CDs, botines, pistas o finales que contradigan el módulo. Si algo no está, dilo implícitamente improvisando coherente, pero nunca uses información inventada como si fuera oficial.
+- Si los jugadores se desvían del camino previsto, úsalo como oportunidad narrativa sin romper los hechos establecidos.
+- Cuando una sección recuperada del módulo (marcada [A#]) aplique, apégate al texto.
+- Las reglas de D&D 5E siguen siendo fuente secundaria para mecánicas; el módulo manda en la ficción.`;
+
+function renderAdventureBlock(snap: SessionSnapshot): string {
+  const hasOutline = Boolean(snap.adventureOutline && snap.adventureOutline.trim());
+  const hasChunks = Boolean(snap.adventureChunks && snap.adventureChunks.length);
+  if (!hasOutline && !hasChunks) return "";
+
+  const header = `AVENTURA CARGADA${snap.adventureSourceName ? ` (fuente: ${snap.adventureSourceName})` : ""}:`;
+  const outline = hasOutline ? `\nESQUEMA OFICIAL DEL MÓDULO:\n${snap.adventureOutline!.trim()}` : "";
+  const chunks = hasChunks
+    ? `\nFRAGMENTOS RELEVANTES DEL MÓDULO (cita-los al dirigir):\n${renderAdventureChunks(snap.adventureChunks)}`
+    : "";
+  return `${header}${outline}${chunks}\n\n${ADVENTURE_DIRECTIVE}`;
+}
+
 function baseSystem(snap: SessionSnapshot, rulesContext: RetrievedChunk[], toneLine: string): string {
   const init = renderInitiative(snap);
   const diff = difficultyGuide(snap.difficulty);
   const diffLine = `${diff.directive}\n(Dificultad seleccionada: ${diff.label})`;
+  const adventureBlock = renderAdventureBlock(snap);
   return `Eres un Dungeon Master experto de D&D 5E. Tu misión es conducir a un grupo real a través de una historia memorable, justa y emocionante.
 
 HISTORIA: ${snap.storyTitle}
@@ -246,8 +283,8 @@ ${renderPlayers(snap.players)}
 ${init ? "\n" + init : ""}
 
 ${snap.recentLog?.length ? `ÚLTIMOS EVENTOS:\n${snap.recentLog.slice(-8).join("\n")}` : ""}
-
-REGLAS RELEVANTES DEL HANDBOOK (usa como verdad):
+${adventureBlock ? "\n" + adventureBlock + "\n" : ""}
+REGLAS RELEVANTES DEL HANDBOOK (usa como verdad mecánica):
 ${renderRulesContext(rulesContext)}
 
 ${toneLine}
@@ -270,6 +307,14 @@ export function buildOpeningPrompt(snap: SessionSnapshot, rulesContext: Retrieve
   const system = baseSystem(snap, rulesContext, `${directive}\n(Nivel de tono seleccionado: ${label} — intensidad ${snap.tone ?? 50}/100)`);
 
   const names = snap.players.map((p) => `${p.name} (${p.race} ${p.class})`).join(", ");
+  const hasModule = Boolean(
+    (snap.adventureOutline && snap.adventureOutline.trim()) ||
+      (snap.adventureChunks && snap.adventureChunks.length)
+  );
+  const moduleDirective = hasModule
+    ? `\n\nESTA HISTORIA USA UN MÓDULO CARGADO. Abre la aventura EXACTAMENTE donde el módulo empieza:\n- Usa la ubicación, hora, clima y gancho iniciales tal como aparecen en el ESQUEMA OFICIAL y los FRAGMENTOS RELEVANTES del módulo.\n- Respeta los nombres de NPCs, lugares y eventos del módulo.\n- Integra a los personajes jugadores (${names || "los aventureros"}) dentro de esa escena inicial sin alterar los hechos del módulo.\n- Si el módulo asume un vínculo entre los personajes, respétalo; si no, invéntalo mínimo y coherente.\n- No adelantes información que el módulo revele más adelante.`
+    : `\n\nSi la SEMILLA DE AVENTURA existe, respétala como premisa. Si es vaga o falta, invéntala coherente con los personajes y el tono.`;
+
   const user = `Inicia la historia AHORA con una escena de apertura cinematográfica. Responde con el formato obligatorio (narrativa + acciones).
 
 Tu apertura DEBE cubrir, en este orden:
@@ -277,9 +322,7 @@ Tu apertura DEBE cubrir, en este orden:
 2. QUIÉNES: presenta a los jugadores por nombre e integra quién es cada uno en la escena inicial (${names || "los aventureros"}).
 3. POR QUÉ están juntos: el vínculo o contrato que los une en este momento.
 4. QUÉ está pasando: el gancho — un conflicto, rumor, encargo o peligro que acaba de irrumpir.
-5. CÓMO pueden actuar: una invitación clara a actuar dirigida a al menos dos jugadores por nombre (preguntas concretas, no genéricas).
-
-Si la SEMILLA DE AVENTURA existe, respétala como premisa. Si es vaga o falta, invéntala coherente con los personajes y el tono.`;
+5. CÓMO pueden actuar: una invitación clara a actuar dirigida a al menos dos jugadores por nombre (preguntas concretas, no genéricas).${moduleDirective}`;
 
   return [
     { role: "system" as const, content: system },
