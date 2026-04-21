@@ -55,7 +55,7 @@ Every narrative message is speakable, per-message, per-voice.
 
 ## Features
 
-1. **`/story/new` → `/story/[id]` — Live session.** AI narrator, side chat, central canvas with grid map, per-message TTS, realtime player state.
+1. **`/story/new` → `/story/[id]` — Live session.** AI narrator, side chat, central canvas with grid map, per-message TTS, realtime player state. Optionally **upload an adventure PDF** — it is ingested into a per-story RAG index, summarized into an outline, and used by the DM as the canonical source of truth (the DM only improvises where the module is silent).
 2. **`/character/new` — Character builder.** Step-by-step wizard: race, class, background, ability scores (standard array / point buy / 4d6), skills, details. Export to a fillable **Spanish PDF sheet** via `GET /api/character/[id]/pdf`.
 3. **`/` — The Vault.** All your stories and characters in one place.
 4. **`/play/[sessionId]` — Mobile companion.** Phone-optimized view joined via QR on the host's LAN. Tabs: Character, Actions, Chat (public/private), Dice.
@@ -169,7 +169,6 @@ data/         SQLite, caches, assets, Piper voices (gitignored)
 - Encounter panel for assistant mode (initiative tracker, reachable attacks per tile).
 - Curated map/token library under `data/assets/`.
 - Inline SFX mixing via `[sfx:*]` tags in the narrative stream.
-- Ingest any user-supplied adventure PDF through the same RAG pipeline as the Handbook.
 
 ---
 
