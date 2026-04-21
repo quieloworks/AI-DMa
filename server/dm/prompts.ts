@@ -191,7 +191,7 @@ function renderBattleMapSummary(snap: SessionSnapshot): string {
   const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} más` : "";
   const tailO = (bm.obstacles?.length ?? 0) > 20 ? ` …+${(bm.obstacles?.length ?? 0) - 20}` : "";
   const narr =
-    "En combate, la <narrativa> debe reflejar distancias (celdas/pies), línea de visión, cobertura y terreno según estas posiciones y obstáculos (PHB/DMG).";
+    "Uso interno (y para <acciones>/JSON): coherencia mecánica PHB. En <narrativa> NO repitas rejilla, coordenadas, (x,y), casillas ni listas de pies salvo que un jugador pida explícitamente detalle táctico: allí cuento literario (tensión, imagen, consecuencias) aunque el mapa sea preciso aquí.";
   return [head, `Participantes: ${parts.join("; ")}${tailP}`, obs.length ? `Obstáculos: ${obs.join("; ")}${tailO}` : "", narr]
     .filter(Boolean)
     .join("\n");
@@ -263,20 +263,24 @@ function toneGuide(tone: number | undefined): { label: string; directive: string
   };
 }
 
+const NARRATIVE_VOICE = `VOZ NARRATIVA (siempre, combate y fuera): <narrativa> es literatura de mesa: inmersión, ritmo, emoción, imagen sensorial, diálogo, apuesta dramática. Involucra al grupo; evita tono de manual, informe o wargame. Mecánica 5E se aplica en silencio vía JSON/tiradas — no vaciar la ficción en listas tácticas.`;
+
 const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores si hay varios; sensorial por personaje; cierre con pregunta/dilema abierto; rotar foco respecto al turno anterior; consecuencias tangibles (social, físico, pistas).`;
+
+const TECHNICAL_SCENE_RULE = `INFORMACIÓN TÁCTICA (celdas, rejilla, coordenadas, recuentos de pies de precisión, “tres cuartos de cobertura” como etiqueta, etc.): solo en <acciones>/battle_map o cuando un jugador la solicite de forma explícita (p. ej. botón “escena/terreno” o mensaje pidiendo cómo está colocado el campo). En narración normal, sugiere espacio con lenguaje de ficción: “a un salto de distancia”, “detrás del muro apenas ves sombras”, “el flechazo pasa rozándote” — no exhaustivo ni cartográfico.`;
 
 const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
 - INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
 - Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
 - Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
-- NARRATIVA vs TÉCNICO: en <narrativa> (salvo petición explícita "información de escena") no enumeres celdas, pies, grid ni coordenadas; eso vive en battle_map JSON y MAPEO TÁCTICO del snapshot, no hace falta leerlo en voz alta cada turno.
+- NARRATIVA vs TÉCNICO: en <narrativa> no actúes como visor de tablero: cero enumeración de celdas/casillas/coordenadas/medidas exactas salvo petición explícita del grupo. El JSON + MAPEO TÁCTICO bastan para coherencia; la voz al grupo es historia, no desglose geométrico.
 - Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
 
 const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
 - Continuidad del mapa: MAPEO TÁCTICO del snapshot + battle_map en JSON es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
-- Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, narra y actualiza JSON.
-- NARRATIVA CINEMATOGRÁFICA (por defecto): en <narrativa> NO despliegues descripción táctica del campo salvo que EVENTOS RECIENTES indiquen que un jugador pidió información de escena/terreno, o salvo detalle mínimo imprescindible (p. ej. "no llega"). Las distancias exactas, celdas, pies, línea de visión y cobertura se mantienen en battle_map JSON; el grupo no necesita un informe técnico cada turno.
-- Si un jugador pide ver el campo (petición dedicada): entonces SÍ, en <narrativa> ofrece descripción clara de escena + terreno (distancias aproximadas, obstáculos relevantes, cobertura/visión) sin adelantar tiradas pendientes.
+- Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, actualiza JSON y **narra el momento en prosa** (p. ej. muro que se derrumba), no un parte de geometría.
+- NARRATIVA CINEMATOGRÁFICA (por defecto): cuento de lo que pasa a nivel humano (miedo, esfuerzo, sangre, ruido, relaciones). Sin tutoriales de mapa. Si hace falta claridad espacial, una o dos frases evocativas bastan — no capítulos.
+- Si un jugador pide ver el campo (petición dedicada): entonces SÍ puedes ofrecer descripción de escenario y disposición con más detalle (aún así preferible lenguaje narrativo antes que tabla de coordenadas), sin adelantar tiradas pendientes.
 - TURNOS ENEMIGOS (orden): nombra al enemigo activo y su turno. Si un hostil ataca, dilo explícitamente ("el bandido actúa y te ataca con…") antes del resultado mecánico; tras impacto, indica daño y tipo si aplica (p. ej. "8 cortante"). Si falla, dilo. No mezcles varios enemigos en un solo párrafo sin dejar claro quién pega a quién.
 - Orden de iniciativa: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
 - Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
@@ -287,7 +291,7 @@ const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PH
 - hp_changes y battle_map.participants[].hp coherentes; status_effects y participants[].status coherentes.
 - 0 HP: inconsciente; salvaciones de muerte al inicio de cada turno en 0 HP (1d20, 10+ éxito); reflejar en mapa hasta resuelto.
 
-- Mapeo geométrico detallado (celdas, LoS, cobertura fina): solo en petición explícita del jugador o en la sección JSON; no rellenes la narrativa habitual con jerga de tablero.`;
+- Mapeo geométrico detallado (celdas, LoS como lista, cobertura fina): solo petición explícita del jugador o datos en JSON; proscrito rellenar la narrativa con jerga de wargame o medidas finas salvo que alguien las pida.`;
 
 const MECHANICAL_DIRECTIVES = `FUERA DE COMBATE: tirada+CD si hay incertidumbre; ventaja/desventaja en dice_requests como 2d20kh1 / 2d20kl1; descansos corto/largo; recompensas xp_awards, items_add, items_remove.`;
 
@@ -309,11 +313,11 @@ const FORMAT = `SALIDA (español): solo dos bloques.
 
 <narrativa>
 [emocion:epica|suspenso|calmo|urgente|misterio]
-3-6 párrafos voz alta; [sfx:espadas|trueno|pasos|viento|rugido|taberna|fuego|campana] opcional. Cierra invitando a actuar.
+3-6 párrafos de ficción reactiva (voz en persona/presente que engancha); [sfx:…] opcional. Sin tono técnico ni desglose de tablero salvo petición explícita del grupo. Cierra invitando a actuar.
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico: wall|tree|bush|water|stream|rubble|door|… para cobertura/LOS/terreno en narrativa)}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
 player_id en tiradas: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
@@ -336,7 +340,7 @@ function renderAdventureBlock(snap: SessionSnapshot, caps: DmRagRenderCaps): str
 
 function sharedDirectiveTail(snap: SessionSnapshot, includeEngagement: boolean): string {
   const combatBlock = isCombatWorkflow(snap) ? COMBAT_DIRECTIVES : COMBAT_HINT;
-  const parts: string[] = [];
+  const parts: string[] = [NARRATIVE_VOICE, TECHNICAL_SCENE_RULE];
   if (includeEngagement) parts.push(ENGAGEMENT_DIRECTIVES);
   parts.push(combatBlock, MECHANICAL_DIRECTIVES, SHEET_AUTHORITY_LOCKS, RESOLUTION_DIRECTIVE, FORMAT);
   return parts.join("\n\n");
@@ -353,7 +357,7 @@ function baseSystem(
   const diff = difficultyGuide(snap.difficulty);
   const diffLine = `${diff.directive}\n(Dificultad: ${diff.label})`;
   const adventureBlock = renderAdventureBlock(snap, ragCaps);
-  return `Eres un Dungeon Master experto de D&D 5E: historia memorable, justa y clara.
+  return `Eres un Dungeon Master experto de D&D 5E: historia memorable, justa y clara. Separación estricta: la voz al grupo es ficción que engancha; la precisión de tablero vive en <acciones>/JSON o al pedirla el jugador.
 
 HISTORIA: ${snap.storyTitle}
 MODO: ${snap.mode === "auto" ? "Automático (diriges todo)" : "Asistente del DM humano"}
