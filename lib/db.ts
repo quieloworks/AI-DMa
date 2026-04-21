@@ -127,6 +127,24 @@ function migrate(db: Database.Database) {
       encrypted TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS adventure_chunk (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      story_id TEXT NOT NULL,
+      section TEXT NOT NULL DEFAULT 'aventura',
+      subsection TEXT,
+      page INTEGER NOT NULL DEFAULT 0,
+      text TEXT NOT NULL,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY(story_id) REFERENCES story(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ac_story ON adventure_chunk(story_id);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS adventure_fts USING fts5(
+      story_id UNINDEXED, section, subsection, text,
+      content='adventure_chunk', content_rowid='id',
+      tokenize='unicode61'
+    );
   `);
 
   try {
@@ -135,6 +153,14 @@ function migrate(db: Database.Database) {
     );`);
   } catch {
     // sqlite-vec no disponible; RAG usará solo FTS
+  }
+
+  try {
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS adventure_vec USING vec0(
+      embedding float[768]
+    );`);
+  } catch {
+    // sqlite-vec no disponible; RAG de aventura usará solo FTS
   }
 
   try {
