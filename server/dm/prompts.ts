@@ -1,6 +1,22 @@
 import type { RetrievedChunk } from "../rag";
 import type { AdventureChunk } from "../adventure";
 
+/** Estado táctico persistido (alineado con battle_map en acciones y en UI). */
+export type SessionBattleMap = {
+  terrain?: string;
+  grid: { cols: number; rows: number; cellFeet?: number };
+  participants: Array<{
+    id: string;
+    name: string;
+    kind: string;
+    x: number;
+    y: number;
+    hp?: { current: number; max: number };
+    status?: string[];
+  }>;
+  obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
+};
+
 export type SessionSnapshot = {
   storyTitle: string;
   mode: "auto" | "assistant";
@@ -39,6 +55,8 @@ export type SessionSnapshot = {
   adventureSourceName?: string | null;
   /** Sesión en combate (persistido en state_json). */
   combat?: boolean;
+  /** Mapa de batalla actual; la fuente de verdad para posiciones y obstáculos durante el combate. */
+  battleMap?: SessionBattleMap | null;
 };
 
 export type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -138,10 +156,43 @@ function renderPlayers(p: SessionSnapshot["players"]): string {
     .join("\n");
 }
 
+function initiativeDisplayName(snap: SessionSnapshot, playerId: string): string {
+  const pj = snap.players.find((p) => p.id === playerId);
+  if (pj) return pj.name;
+  const tok = snap.battleMap?.participants?.find((p) => p.id === playerId);
+  if (tok) return `${tok.name} [${tok.kind}]`;
+  return playerId;
+}
+
 function renderInitiative(snap: SessionSnapshot): string {
   if (!snap.initiative?.length) return "";
   const sorted = [...snap.initiative].sort((a, b) => b.value - a.value);
-  return `INICIATIVA ACTIVA: ${sorted.map((i) => `${i.player_id}(${i.value})`).join(" > ")}`;
+  return `INICIATIVA (orden de turno, mayor primero): ${sorted.map((i) => `${initiativeDisplayName(snap, i.player_id)}=${i.value}`).join(" → ")}`;
+}
+
+function renderBattleMapSummary(snap: SessionSnapshot): string {
+  const bm = snap.battleMap;
+  if (!bm?.grid) return "";
+  const cf = bm.grid.cellFeet ?? 5;
+  const head = `MAPEO TÁCTICO: terreno=${bm.terrain ?? "—"} · rejilla ${bm.grid.cols}×${bm.grid.rows} celdas (~${cf} pies/celda)`;
+  const parts = (bm.participants ?? [])
+    .slice(0, 28)
+    .map((p) => {
+      const hp =
+        p.hp !== undefined ? ` HP${p.hp.current}/${p.hp.max}` : "";
+      const st = p.status?.length ? ` [${p.status.join(", ")}]` : "";
+      return `${p.name}(${p.id}·${p.kind}) @(${p.x},${p.y})${hp}${st}`;
+    });
+  const obs = (bm.obstacles ?? []).slice(0, 20).map((o) => {
+    const w = o.w ?? 1;
+    const h = o.h ?? 1;
+    return `(${o.x},${o.y})${w}×${h}${o.kind ? ` ${o.kind}` : ""}`;
+  });
+  const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} más` : "";
+  const tailO = (bm.obstacles?.length ?? 0) > 20 ? ` …+${(bm.obstacles?.length ?? 0) - 20}` : "";
+  return [head, `Participantes: ${parts.join("; ")}${tailP}`, obs.length ? `Obstáculos: ${obs.join("; ")}${tailO}` : ""]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function isCombatWorkflow(snap: SessionSnapshot): boolean {
@@ -212,14 +263,22 @@ function toneGuide(tone: number | undefined): { label: string; directive: string
 
 const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores si hay varios; sensorial por personaje; cierre con pregunta/dilema abierto; rotar foco respecto al turno anterior; consecuencias tangibles (social, físico, pistas).`;
 
-const COMBAT_HINT = `COMBATE: si empieza combate, narra "COMBATE INICIA", pon combat:true, battle_map completo (grid, participants x/y, obstacles), pide iniciativa 1d20+DES en dice_requests; 1 celda≈5 pies (cellFeet típ. 5). Al terminar: combat:false y combat_end:true.`;
+const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
+- INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
+- Hasta tener initiative[] completo para todos los del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
+- Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
 
-const COMBAT_DIRECTIVES = `COMBATE 5E (activo):
-- Cada turno: battle_map actualizado con todos los vivos (x,y en celdas); obstáculos estables salvo cambio narrativo.
-- Ronda: acción + bonus si aplica + reacción fuera de turno + movimiento = velocidad; 30 pies ≈ 6 celdas si cellFeet=5.
-- Ataque: d20+mod+prof vs CA; daño en tirada aparte. Salvaciones: CD + atributo. Hechizos: nivel de slot, componentes, concentración.
-- hp_changes reflejados también en battle_map.participants[].hp; status_effects y battle_map.participants[].status alineados.
-- 0 HP: salvaciones de muerte por turno (1d20, 10+ éxito); status inconsciente en mapa hasta resuelto.`;
+const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
+- Continuidad del mapa: MAPEO TÁCTICO arriba es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
+- Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, narra y actualiza JSON.
+- Orden: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
+- Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
+- Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
+- Ataques: d20 + mod + maestría (si competencia) vs CA; crítico natural 20 / pifia 1 en d20 de ataque; daño con tirada aparte. Cobertura, línea de efecto, alcance, visión a oscuras según escena y reglas.
+- Salvaciones de atributo: CD fija del efecto; ventaja/desventaja solo cuando el manual o el estado lo mande.
+- Hechizos: tiempo de lanzamiento, componentes, slots, concentración (un solo conjuro concentrado a la vez), interrupciones que dañan — todo explícito.
+- hp_changes y battle_map.participants[].hp coherentes; status_effects y participants[].status coherentes.
+- 0 HP: inconsciente; salvaciones de muerte al inicio de cada turno en 0 HP (1d20, 10+ éxito); reflejar en mapa hasta resuelto.`;
 
 const MECHANICAL_DIRECTIVES = `FUERA DE COMBATE: tirada+CD si hay incertidumbre; ventaja/desventaja en dice_requests como 2d20kh1 / 2d20kl1; descansos corto/largo; recompensas xp_awards, items_add, items_remove.`;
 
@@ -241,8 +300,8 @@ const FORMAT = `SALIDA (español): solo dos bloques.
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}]}, combat_end, initiative[{player_id,value}], dice_requests[{player_id,expression,label,dc?}], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
-player_id: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}]}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{player_id,expression,label,dc?}], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+player_id en tiradas: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
 Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.
@@ -277,6 +336,7 @@ function baseSystem(
   ragCaps: DmRagRenderCaps
 ): string {
   const init = renderInitiative(snap);
+  const mapBlock = renderBattleMapSummary(snap);
   const diff = difficultyGuide(snap.difficulty);
   const diffLine = `${diff.directive}\n(Dificultad: ${diff.label})`;
   const adventureBlock = renderAdventureBlock(snap, ragCaps);
@@ -289,6 +349,7 @@ TURNO: ${snap.turn}${snap.seed ? `\nSEMILLA: ${snap.seed}` : ""}${snap.summary ?
 JUGADORES:
 ${renderPlayers(snap.players)}
 ${init ? "\n" + init : ""}
+${mapBlock ? "\n" + mapBlock : ""}
 
 ${snap.recentLog?.length ? `EVENTOS RECIENTES:\n${snap.recentLog.slice(-8).join("\n")}` : ""}
 ${adventureBlock ? "\n" + adventureBlock + "\n" : ""}
@@ -313,6 +374,7 @@ TURNO: ${snap.turn}${snap.summary ? `\nCONTEXTO: ${snap.summary}` : ""}
 JUGADORES:
 ${renderPlayers(snap.players)}
 ${renderInitiative(snap) ? "\n" + renderInitiative(snap) : ""}
+${renderBattleMapSummary(snap) ? "\n" + renderBattleMapSummary(snap) : ""}
 
 ${adventureBlock ? adventureBlock + "\n\n" : ""}HANDBOOK:
 ${renderRulesContextForPrompt(rulesContext, ragCaps)}
@@ -371,7 +433,7 @@ export function buildAutoDmPrompt(
   if (action.kind === "continue") {
     user = `Continúa desde el último momento narrativo.
 - Una frase resume lo que plantearon los jugadores (si hubo mensajes).
-- Avanza escena: resuelve tiradas pendientes, consecuencias, nuevo estímulo o cierre de subescena; respeta iniciativa en combate.
+- Avanza escena: resuelve tiradas pendientes, consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y mantén MAPEO TÁCTICO continuo (posiciones y obstáculos coherentes turno a turno).
 - Invita a actuar rotando foco.${action.recentSignals?.length ? `\nSeñales:\n- ${action.recentSignals.join("\n- ")}` : ""}`;
   } else {
     user = `Jugador ${action.playerName}: ${action.text}

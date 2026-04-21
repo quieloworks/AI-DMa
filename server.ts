@@ -1,4 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "node:url";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
@@ -35,6 +37,36 @@ async function findFreePort(start: number): Promise<number> {
   const app = next({ dev, hostname, port });
   const handle = app.getRequestHandler();
   await app.prepare();
+
+  // #region agent log
+  {
+    const serverDir = join(process.cwd(), ".next", "server");
+    const chunkChecks = ["948.js", "682.js", "chunks/948.js", "chunks/682.js"].map((rel) => ({
+      rel,
+      exists: existsSync(join(serverDir, rel)),
+    }));
+    let webpackU = "";
+    try {
+      const wr = readFileSync(join(serverDir, "webpack-runtime.js"), "utf8");
+      const m = wr.match(/__webpack_require__\.u\s*=\s*\([^)]*\)\s*=>\s*\{[^}]*\}/);
+      webpackU = m ? m[0].replace(/\s+/g, " ").slice(0, 220) : "no_u_match";
+    } catch (e) {
+      webpackU = `read_fail:${(e as Error).message}`;
+    }
+    fetch("http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b55592" },
+      body: JSON.stringify({
+        sessionId: "b55592",
+        hypothesisId: "H1",
+        location: "server.ts:after-prepare",
+        message: "next server chunk path probe",
+        data: { dev, serverDir, chunkChecks, webpackU, argv0: process.argv[0] },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
 
   const httpServer: HttpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url ?? "/", true);

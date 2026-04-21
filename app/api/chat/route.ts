@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
     adventureOutline,
     adventureSourceName: storyData.sourceFileName ?? null,
     combat: state.combat === true,
+    battleMap: state.battleMap ?? null,
   };
 
   const ragBudget = getDmRagBudget();
@@ -338,7 +339,10 @@ export async function POST(req: NextRequest) {
             };
           }
 
-          if (!nextCombat) nextState.battleMap = null;
+          if (!nextCombat) {
+            nextState.battleMap = null;
+            nextState.initiative = [];
+          }
 
           db.prepare("UPDATE session SET state_json = ?, updated_at = ? WHERE id = ?").run(
             JSON.stringify(nextState),
