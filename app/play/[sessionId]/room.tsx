@@ -34,6 +34,9 @@ type Player = {
 
 type Tab = "personaje" | "acciones" | "chat" | "dados";
 
+/** Grupo: crónica compartida. Privado: solo susurros DM↔este jugador (no mezclar con la narración). */
+type ChatSubTab = "group" | "private";
+
 type ChatMsg = { id: string; from: "dm" | "me" | "system"; text: string; kind: "public" | "private" };
 
 type DiceResult = { label?: string; expression: string; total: number; breakdown: string };
@@ -110,6 +113,7 @@ export function PlayRoom({
   });
   const [currentData, setCurrentData] = useState<CharData>(() => picked?.character?.data ?? {});
   const [tab, setTab] = useState<Tab>("personaje");
+  const [chatSubTab, setChatSubTab] = useState<ChatSubTab>("group");
   const [socket, setSocket] = useState<Socket | null>(null);
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -146,7 +150,13 @@ export function PlayRoom({
         if (msg.kind === "dm-assistant") return;
         if (msg.originClientId === clientIdRef.current) return;
         const mine = msg.playerId === picked.player_id;
-        if (msg.kind === "private" && !mine && msg.role !== "dm") return;
+        if (msg.kind === "private") {
+          if (msg.role === "dm") {
+            if (msg.playerId !== picked.player_id) return;
+          } else if (!mine) {
+            return;
+          }
+        }
         setChat((prev) => [
           ...prev,
           {

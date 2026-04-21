@@ -117,6 +117,15 @@ export async function POST(req: NextRequest) {
     const hp = (data.hp as { current?: number; max?: number; temp?: number }) ?? { current: 10, max: 10, temp: 0 };
     const equipment = (data.equipment as Array<{ name: string; qty: number }> | undefined) ?? [];
     const spellsObj = (data.spells as { known?: Array<{ name: string; level: number; prepared?: boolean }>; slots?: Record<string, { max: number; used: number }> } | undefined) ?? {};
+    const profRaw = data.proficiencies as
+      | { armor?: string[]; weapons?: string[]; tools?: string[]; languages?: string[] }
+      | undefined;
+    const proficiencies = {
+      armor: Array.isArray(profRaw?.armor) ? profRaw!.armor : [],
+      weapons: Array.isArray(profRaw?.weapons) ? profRaw!.weapons : [],
+      tools: Array.isArray(profRaw?.tools) ? profRaw!.tools : [],
+      languages: Array.isArray(profRaw?.languages) ? profRaw!.languages : [],
+    };
     const liveStatuses = (data.statusEffects as string[] | undefined) ?? [];
     const snapStatuses = (state.players?.find((p2) => p2.id === p.player_id)?.statusEffects ?? []) as string[];
     return {
@@ -132,6 +141,7 @@ export async function POST(req: NextRequest) {
       equipment,
       spellsKnown: spellsObj.known,
       spellSlots: spellsObj.slots,
+      proficiencies,
     };
   });
 

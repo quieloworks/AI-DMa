@@ -19,6 +19,13 @@ export type SessionSnapshot = {
     equipment?: Array<{ name: string; qty: number }>;
     spellsKnown?: Array<{ name: string; level: number; prepared?: boolean }>;
     spellSlots?: Record<string, { max: number; used: number }>;
+    /** Competencias de ficha (PHB): candados para armas, armaduras y herramientas. */
+    proficiencies?: {
+      armor: string[];
+      weapons: string[];
+      tools: string[];
+      languages?: string[];
+    };
   }>;
   sceneTags?: string[];
   recentLog?: string[];
@@ -88,6 +95,13 @@ export function renderAdventureChunksForPrompt(chunks: AdventureChunk[] | undefi
     .join("\n\n");
 }
 
+function sliceJoin(items: string[], max: number, sep = ", "): string {
+  if (!items.length) return "";
+  const shown = items.slice(0, max);
+  const tail = items.length > max ? `${sep}… (+${items.length - max})` : "";
+  return shown.join(sep) + tail;
+}
+
 function renderPlayers(p: SessionSnapshot["players"]): string {
   return p
     .map((x) => {
@@ -109,7 +123,17 @@ function renderPlayers(p: SessionSnapshot["players"]): string {
             .map(([lvl, s]) => `nv${lvl} ${s.max - s.used}/${s.max}`)
             .join(", ")}`
         : "";
-      return head + eq + spells + slots;
+      const pr = x.proficiencies;
+      let profLine = "";
+      if (pr && (pr.armor.length || pr.weapons.length || pr.tools.length || (pr.languages?.length ?? 0))) {
+        const bits: string[] = [];
+        if (pr.armor.length) bits.push(`armaduras: ${sliceJoin(pr.armor, 8)}`);
+        if (pr.weapons.length) bits.push(`armas: ${sliceJoin(pr.weapons, 10)}`);
+        if (pr.tools.length) bits.push(`herramientas: ${sliceJoin(pr.tools, 8)}`);
+        if (pr.languages?.length) bits.push(`idiomas: ${sliceJoin(pr.languages, 6)}`);
+        profLine = `\n    competencias: ${bits.join(" · ")}`;
+      }
+      return head + eq + spells + slots + profLine;
     })
     .join("\n");
 }
@@ -199,7 +223,15 @@ const COMBAT_DIRECTIVES = `COMBATE 5E (activo):
 
 const MECHANICAL_DIRECTIVES = `FUERA DE COMBATE: tirada+CD si hay incertidumbre; ventaja/desventaja en dice_requests como 2d20kh1 / 2d20kl1; descansos corto/largo; recompensas xp_awards, items_add, items_remove.`;
 
-const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO: si el éxito no es obvio (ataque, conjuro, habilidad, salvación, etc.), PARA la narración antes del desenlace, pide dice_requests por player_id (no uses "all" salvo que todos tiren lo mismo), con expression XdY+Z, label y dc si aplica. No narres éxito/fracaso hasta el siguiente turno con resultados. Si no hay tirada, dilo y resuelve.`;
+/** Autoridad de ficha: el jugador puede proponer lo que quiera; la mecánica solo corre si encaja con lista + PHB. */
+const SHEET_AUTHORITY_LOCKS = `CANDADOS DE FICHA (ley del juego):
+- Bajo cada jugador [id], lo listado (equipo, conjuros, slots, competencias armaduras/armas/herramientas/idiomas) es la verdad del personaje. No inventes conjuros, armas empuñadas, ni herramientas que no estén ahí salvo reglas explícitas del Handbook (p. ej. objeto improvisado) y coherencia con el equipo.
+- Si declaran un conjuro o truco que no aparece en su lista, o un nivel de slot que no tienen libre, o una herramienta sin competencia listada: la acción no procede a mecánica — narra el rechazo (olvido, gesto incompleto, falta de componentes, etc.); no pidas dados para ese efecto; no uses spell_slots, hp_changes ni ventaja por competencia por ese intento.
+- Ataques: el arma debe ser coherente con "equipo" y, si aplica 5E, con competencias de armas (simples/marciales, etc.); sin competencia no regales el uso competente del arma.
+- Si el nombre es ambiguo respecto a la lista, pide una aclaración corta antes de tirar.
+- La creatividad del jugador se acoge siempre que no contradiga ficha ni fragmentos [R#]/[A#] del Handbook/módulo.`;
+
+const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO: si el éxito no es obvio (ataque, conjuro, habilidad, salvación, etc.), PARA la narración antes del desenlace, pide dice_requests por player_id (no uses "all" salvo que todos tiren lo mismo), con expression XdY+Z, label y dc si aplica. No narres éxito/fracaso hasta el siguiente turno con resultados. Si no hay tirada, dilo y resuelve. Si la acción es imposible por ficha (CANDADOS DE FICHA), no es "incertidumbre": niega sin tirada.`;
 
 const FORMAT = `SALIDA (español): solo dos bloques.
 
@@ -234,7 +266,7 @@ function sharedDirectiveTail(snap: SessionSnapshot, includeEngagement: boolean):
   const combatBlock = isCombatWorkflow(snap) ? COMBAT_DIRECTIVES : COMBAT_HINT;
   const parts: string[] = [];
   if (includeEngagement) parts.push(ENGAGEMENT_DIRECTIVES);
-  parts.push(combatBlock, MECHANICAL_DIRECTIVES, RESOLUTION_DIRECTIVE, FORMAT);
+  parts.push(combatBlock, MECHANICAL_DIRECTIVES, SHEET_AUTHORITY_LOCKS, RESOLUTION_DIRECTIVE, FORMAT);
   return parts.join("\n\n");
 }
 

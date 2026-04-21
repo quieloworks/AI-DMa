@@ -1276,13 +1276,19 @@ function DmBubble({
         <span className="label" style={{ color: "var(--color-accent)" }}>
           {isPrivate ? `🔒 Susurro${target ? " → " + target : ""}` : "Dungeon Master"}
         </span>
-        <button
-          onClick={onSpeak}
-          className="text-xs"
-          style={{ color: active ? "var(--color-accent)" : "var(--color-text-hint)" }}
-        >
-          {active ? (playing ? "🔊 sonando" : "⏸ pausado") : "🔊 leer"}
-        </button>
+        {!isPrivate ? (
+          <button
+            onClick={onSpeak}
+            className="text-xs"
+            style={{ color: active ? "var(--color-accent)" : "var(--color-text-hint)" }}
+          >
+            {active ? (playing ? "🔊 sonando" : "⏸ pausado") : "🔊 leer"}
+          </button>
+        ) : (
+          <span className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
+            no se narra al grupo
+          </span>
+        )}
       </div>
       <p className="text-sm" style={{ fontFamily: "var(--font-display)", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
         {text}
