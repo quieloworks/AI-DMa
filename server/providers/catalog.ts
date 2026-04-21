@@ -5,11 +5,12 @@ export type ChatProviderId =
   | "gemini"
   | "openrouter"
   | "groq"
+  | "grok"
   | "custom";
 
-export type ImageProviderId = "none" | "openai" | "gemini" | "stability";
+export type ImageProviderId = "none" | "openai" | "gemini" | "stability" | "grok";
 
-export type VoiceProviderId = "piper" | "openai" | "elevenlabs" | "browser";
+export type VoiceProviderId = "system" | "openai" | "elevenlabs" | "browser";
 
 export type ProviderCatalogEntry = {
   id: string;
@@ -76,6 +77,14 @@ export const CHAT_CATALOG: ProviderCatalogEntry[] = [
     requiresKey: true,
   },
   {
+    id: "grok",
+    label: "xAI Grok",
+    defaultModel: "grok-4-1-fast-reasoning",
+    models: ["grok-4-1-fast-reasoning"],
+    requiresKey: true,
+    notes: "API compatible con OpenAI en https://api.x.ai/v1. Variable de entorno: XAI_API_KEY.",
+  },
+  {
     id: "custom",
     label: "OpenAI-compatible (custom)",
     defaultModel: "",
@@ -111,15 +120,24 @@ export const IMAGE_CATALOG: ProviderCatalogEntry[] = [
     models: ["sd3.5-large", "sd3.5-medium", "core"],
     requiresKey: true,
   },
+  {
+    id: "grok",
+    label: "xAI Grok Imagine",
+    defaultModel: "grok-imagine-image",
+    models: ["grok-imagine-image", "grok-imagine-image-pro"],
+    requiresKey: true,
+    notes: "POST /v1/images/generations. Usa la misma XAI_API_KEY que el chat.",
+  },
 ];
 
 export const VOICE_CATALOG: ProviderCatalogEntry[] = [
   {
-    id: "piper",
-    label: "Piper (local)",
-    defaultModel: "es_MX-claude-high",
+    id: "system",
+    label: "Voz del sistema (local)",
+    defaultModel: "Paulina",
     requiresKey: false,
-    notes: "Coloca los modelos .onnx en `data/voices/`.",
+    notes:
+      "macOS: `say` + conversión a WAV (sin red). Linux: `espeak-ng`. Nombre de voz: en Mac `say -v '?'`; por defecto Paulina (es-MX).",
   },
   {
     id: "openai",

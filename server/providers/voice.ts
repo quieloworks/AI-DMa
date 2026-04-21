@@ -1,5 +1,10 @@
 import { getApiKey, getProvidersConfig, type VoiceConfig } from "./config";
-import { checkPiper, synthesize, emotionToParams } from "@/server/piper";
+import {
+  checkSystemTts,
+  emotionToSpeakingRate,
+  resolveSystemVoice,
+  synthesizeToWav,
+} from "@/server/system-tts";
 
 export type VoiceInput = {
   text: string;
@@ -18,8 +23,8 @@ export async function synthesizeVoice(input: VoiceInput): Promise<VoiceResult> {
   switch (cfg.provider) {
     case "browser":
       return { kind: "fallback", reason: "browser-configured" };
-    case "piper":
-      return piperTts(input, cfg);
+    case "system":
+      return systemTts(input, cfg);
     case "openai":
       return openAITts(input, cfg);
     case "elevenlabs":
@@ -29,18 +34,28 @@ export async function synthesizeVoice(input: VoiceInput): Promise<VoiceResult> {
   }
 }
 
-async function piperTts(input: VoiceInput, cfg: VoiceConfig): Promise<VoiceResult> {
-  const status = await checkPiper();
-  if (!status.installed || !status.voicePath) {
-    return { kind: "fallback", reason: status.error ?? "piper-voz-no-descargada" };
+async function systemTts(input: VoiceInput, cfg: VoiceConfig): Promise<VoiceResult> {
+  const status = await checkSystemTts();
+  if (!status.ok) {
+    return { kind: "fallback", reason: status.detail ?? "tts-sistema-no-disponible" };
   }
-  const params = {
-    voice: input.voice ?? cfg.voice ?? status.voice,
-    ...emotionToParams(input.emotion),
-  };
-  const raw = synthesize(input.text, params);
-  const wav = pcmToWav(raw, 22050);
-  return { kind: "stream", body: wav, contentType: "audio/wav" };
+  try {
+    const voice = resolveSystemVoice(input.voice ?? cfg.voice);
+    const wav = await synthesizeToWav(input.text, {
+      voice,
+      rate: emotionToSpeakingRate(input.emotion),
+    });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(wav));
+        controller.close();
+      },
+    });
+    return { kind: "stream", body, contentType: "audio/wav" };
+  } catch (err) {
+    console.error("[system-tts]", err);
+    return { kind: "fallback", reason: "tts-sistema-error" };
+  }
 }
 
 async function openAITts(input: VoiceInput, cfg: VoiceConfig): Promise<VoiceResult> {
@@ -140,31 +155,3 @@ function emotionStyle(emotion?: string): number {
   }
 }
 
-function pcmToWav(pcm: NodeJS.ReadableStream, sampleRate: number): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(wavHeaderPlaceholder(sampleRate));
-      pcm.on("data", (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-      pcm.on("end", () => controller.close());
-      pcm.on("error", (err) => controller.error(err));
-    },
-  });
-}
-
-function wavHeaderPlaceholder(sampleRate: number): Uint8Array {
-  const header = Buffer.alloc(44);
-  header.write("RIFF", 0);
-  header.writeUInt32LE(0xffffffff, 4);
-  header.write("WAVE", 8);
-  header.write("fmt ", 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write("data", 36);
-  header.writeUInt32LE(0xffffffff, 40);
-  return new Uint8Array(header);
-}

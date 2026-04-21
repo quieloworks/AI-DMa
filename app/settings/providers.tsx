@@ -17,6 +17,7 @@ type KeyProvider =
   | "gemini"
   | "openrouter"
   | "groq"
+  | "grok"
   | "stability"
   | "elevenlabs"
   | "custom";
@@ -43,6 +44,7 @@ const KEY_PROVIDERS_FOR_CHAT: Record<string, KeyProvider | null> = {
   gemini: "gemini",
   openrouter: "openrouter",
   groq: "groq",
+  grok: "grok",
   custom: "custom",
 };
 const KEY_PROVIDERS_FOR_IMAGE: Record<string, KeyProvider | null> = {
@@ -50,9 +52,10 @@ const KEY_PROVIDERS_FOR_IMAGE: Record<string, KeyProvider | null> = {
   openai: "openai",
   gemini: "gemini",
   stability: "stability",
+  grok: "grok",
 };
 const KEY_PROVIDERS_FOR_VOICE: Record<string, KeyProvider | null> = {
-  piper: null,
+  system: null,
   browser: null,
   openai: "openai",
   elevenlabs: "elevenlabs",
@@ -335,7 +338,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
 
       <Section
         title="Voz narrada"
-        description="Piper corre local y es gratuito. OpenAI/ElevenLabs ofrecen voces más expresivas."
+        description="La voz del sistema (say / espeak-ng) es gratuita y no usa red. OpenAI/ElevenLabs ofrecen voces más expresivas."
         action={
           <TestButton
             ok={testResult.voice?.ok}
@@ -362,7 +365,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
                       ...prev.config.voice,
                       provider: id,
                       model: cat?.defaultModel ?? "",
-                      voice: id === "openai" ? "coral" : id === "piper" ? (cat?.defaultModel ?? prev.config.voice.voice) : prev.config.voice.voice,
+                      voice: id === "openai" ? "coral" : id === "system" ? (cat?.defaultModel ?? prev.config.voice.voice) : prev.config.voice.voice,
                     },
                   },
                 }));
@@ -401,7 +404,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               />
             )}
           </Field>
-          <Field label={state.config.voice.provider === "elevenlabs" ? "voice_id" : state.config.voice.provider === "openai" ? "Voz" : "Voz / modelo ONNX"}>
+          <Field label={state.config.voice.provider === "elevenlabs" ? "voice_id" : state.config.voice.provider === "openai" ? "Voz" : "Voz (sistema)"}>
             {state.config.voice.provider === "openai" ? (
               <select
                 className="input"
@@ -472,7 +475,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         </div>
         <Note>
           También puedes exponer variables de entorno: <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>,
-          <code> OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>STABILITY_API_KEY</code>, <code>ELEVENLABS_API_KEY</code>.
+          <code> OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>XAI_API_KEY</code>, <code>STABILITY_API_KEY</code>, <code>ELEVENLABS_API_KEY</code>.
         </Note>
       </Section>
 

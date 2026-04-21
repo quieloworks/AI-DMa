@@ -19,6 +19,7 @@ export async function* chatStream(messages: ChatMsg[], opts: ChatOpts = {}): Asy
     case "openai":
     case "openrouter":
     case "groq":
+    case "grok":
     case "custom":
       yield* streamOpenAICompatible(messages, cfg, opts);
       return;
@@ -63,6 +64,8 @@ function openAICompatibleBaseUrl(cfg: ChatConfig): string {
       return "https://openrouter.ai/api/v1";
     case "groq":
       return "https://api.groq.com/openai/v1";
+    case "grok":
+      return "https://api.x.ai/v1";
     default:
       throw new Error("Para 'custom' define baseUrl en la configuración.");
   }
@@ -76,6 +79,8 @@ function openAICompatibleKey(cfg: ChatConfig): string | null {
       return getApiKey("openrouter");
     case "groq":
       return getApiKey("groq");
+    case "grok":
+      return getApiKey("grok");
     case "custom":
       return getApiKey("custom");
     default:

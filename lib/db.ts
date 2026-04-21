@@ -28,17 +28,8 @@ export function getDb(): Database.Database {
 }
 
 function migrate(db: Database.Database) {
-  // #region agent log
   try {
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
-    const assetCols = db.prepare("PRAGMA table_info(asset)").all() as Array<{ name: string }>;
-    fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',hypothesisId:'H1',location:'lib/db.ts:migrate-start',message:'pre-migrate db state',data:{tables:tables.map(t=>t.name),assetCols:assetCols.map(c=>c.name)},timestamp:Date.now()})}).catch(()=>{});
-  } catch (e) {
-    fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',hypothesisId:'H2',location:'lib/db.ts:migrate-start',message:'pre-migrate inspection failed',data:{err:String(e)},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
-  try {
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -155,13 +146,7 @@ function migrate(db: Database.Database) {
       tokenize='unicode61'
     );
   `);
-  // #region agent log
-  fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',hypothesisId:'H1',location:'lib/db.ts:migrate-exec-ok',message:'main exec completed without error',data:{},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   } catch (e) {
-    // #region agent log
-    fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',hypothesisId:'H1',location:'lib/db.ts:migrate-exec-throw',message:'main exec threw',data:{err:String(e),stack:(e as Error)?.stack?.split('\n').slice(0,3).join(' | ')},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throw e;
   }
 
@@ -189,17 +174,9 @@ function migrate(db: Database.Database) {
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_cache_key ON asset(cache_key) WHERE cache_key IS NOT NULL"
     );
-  } catch (e) {
-    // #region agent log
-    fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',runId:'post-fix',hypothesisId:'H1',location:'lib/db.ts:cache_key-migration',message:'cache_key defensive migration failed',data:{err:String(e)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+  } catch {
+    // cache_key migration best-effort
   }
-  // #region agent log
-  try {
-    const assetColsAfter = db.prepare("PRAGMA table_info(asset)").all() as Array<{ name: string }>;
-    fetch('http://127.0.0.1:7883/ingest/2d1d67f7-0330-43e0-afca-55966689b1f5',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3b2c03'},body:JSON.stringify({sessionId:'3b2c03',runId:'post-fix',hypothesisId:'H1',location:'lib/db.ts:migrate-end',message:'post-migrate asset cols',data:{assetCols:assetColsAfter.map(c=>c.name)},timestamp:Date.now()})}).catch(()=>{});
-  } catch {}
-  // #endregion
 }
 
 export function setMeta(key: string, value: string) {

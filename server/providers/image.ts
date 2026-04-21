@@ -113,6 +113,8 @@ export async function generateImage(input: ImageGenInput): Promise<ImageGenResul
       return geminiGenerate(input, cfg);
     case "stability":
       return stabilityGenerate(input, cfg);
+    case "grok":
+      return grokGenerate(input, cfg);
     default:
       throw new Error(`Proveedor de imágenes no soportado: ${cfg.provider}`);
   }
@@ -170,6 +172,46 @@ async function geminiGenerate(input: ImageGenInput, cfg: ImageConfig): Promise<I
   const ext = p.mimeType?.includes("jpeg") ? "jpg" : "png";
   const saved = saveAsset(bytes, ext, { title: input.title, tags: input.tags, cacheKey: input.cacheKey });
   return { ...saved, provider: "gemini", model };
+}
+
+function grokAspectRatio(size: ImageConfig["size"]): string {
+  switch (size) {
+    case "1024x1536":
+      return "2:3";
+    case "1536x1024":
+    case "1792x1024":
+      return "3:2";
+    default:
+      return "1:1";
+  }
+}
+
+async function grokGenerate(input: ImageGenInput, cfg: ImageConfig): Promise<ImageGenResult> {
+  const key = getApiKey("grok");
+  if (!key) throw new Error("Falta XAI_API_KEY.");
+  const model = cfg.model || "grok-imagine-image";
+  const body: Record<string, unknown> = {
+    model,
+    prompt: input.prompt,
+    n: 1,
+    response_format: "b64_json",
+    aspect_ratio: grokAspectRatio(input.size ?? cfg.size),
+  };
+  const res = await fetch("https://api.x.ai/v1/images/generations", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`grok image ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const json = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const entry = json.data?.[0];
+  if (!entry) throw new Error("Grok no devolvió imagen.");
+  let bytes: Buffer;
+  if (entry.b64_json) bytes = Buffer.from(entry.b64_json, "base64");
+  else if (entry.url) bytes = Buffer.from(await (await fetch(entry.url)).arrayBuffer());
+  else throw new Error("respuesta de imagen inesperada.");
+  const saved = saveAsset(bytes, "png", { title: input.title, tags: input.tags, cacheKey: input.cacheKey });
+  return { ...saved, provider: "grok", model };
 }
 
 async function stabilityGenerate(input: ImageGenInput, cfg: ImageConfig): Promise<ImageGenResult> {

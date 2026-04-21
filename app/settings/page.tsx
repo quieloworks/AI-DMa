@@ -1,7 +1,7 @@
 import { Shell } from "@/components/Shell";
 import { getSetting } from "@/lib/db";
 import { ensureModelsAvailable } from "@/server/ollama";
-import { checkPiper } from "@/server/piper";
+import { checkSystemTts } from "@/server/system-tts";
 import { handbookStats } from "@/server/rag";
 import { getProvidersConfig, listConfiguredKeys } from "@/server/providers/config";
 import { CHAT_CATALOG, IMAGE_CATALOG, OPENAI_TTS_VOICES, VOICE_CATALOG } from "@/server/providers/catalog";
@@ -21,7 +21,7 @@ type GlobalSettings = {
 const DEFAULTS: GlobalSettings = {
   diceDm: "auto",
   diceDefault: "auto",
-  voice: "es_MX-claude-high",
+  voice: "Paulina",
   sfx: true,
   defaultMode: "auto",
 };
@@ -29,7 +29,7 @@ const DEFAULTS: GlobalSettings = {
 export default async function SettingsPage() {
   const s = getSetting<GlobalSettings>("global", DEFAULTS);
   const models = await ensureModelsAvailable();
-  const piper = await checkPiper();
+  const systemTts = await checkSystemTts();
   const hb = handbookStats();
   const providersInitial = {
     config: getProvidersConfig(),
@@ -56,7 +56,15 @@ export default async function SettingsPage() {
             <Row label="Ollama" ok={models.installed.length > 0} detail={`${models.installed.length} modelos instalados`} />
             <Row label="Modelo de chat (gemma4)" ok={models.chat} detail={models.chat ? "OK" : "no encontrado — corre `ollama pull gemma4:e2b`"} />
             <Row label="Modelo de embeddings" ok={models.embed} detail={models.embed ? "OK" : "corre `ollama pull nomic-embed-text`"} />
-            <Row label="Piper TTS" ok={piper.installed && !!piper.voicePath} detail={piper.installed ? (piper.voicePath ? `voz: ${piper.voice}` : `voz ${piper.voice} no descargada en data/voices`) : "binario no encontrado en PATH"} />
+            <Row
+              label="TTS local (sistema)"
+              ok={systemTts.ok}
+              detail={
+                systemTts.ok
+                  ? `${systemTts.engine ?? "?"} · voz por defecto: ${systemTts.voice}`
+                  : (systemTts.detail ?? "no disponible")
+              }
+            />
           </ul>
         </section>
 

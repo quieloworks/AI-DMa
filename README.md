@@ -1,6 +1,6 @@
 # Mesa — The AI Dungeon Master
 
-> A fullstack, local-first **AI tabletop platform** for Dungeons & Dragons 5E. Your Dungeon Master is a language model. Your narrator is a neural voice. Your scenes are generated on demand. Your friends join from their phones by scanning a QR code.
+> A fullstack, local-first **AI tabletop platform** for Dungeons & Dragons 5E. Your Dungeon Master is a language model. Your narrator uses local or cloud TTS. Your scenes are generated on demand. Your friends join from their phones by scanning a QR code.
 
 Mesa runs an end-to-end AI stack — **LLM + RAG + TTS + image generation** — orchestrated around a real D&D 5E rules engine, so the magic feels like a real game table, not a chatbot.
 
@@ -10,8 +10,8 @@ Mesa runs an end-to-end AI stack — **LLM + RAG + TTS + image generation** — 
 
 Most AI D&D tools are thin wrappers over ChatGPT. Mesa is the opposite: a real game client with a real rules engine, where AI is a first-class citizen at every layer.
 
-- **Local-first by design.** Runs entirely on your machine with Ollama + Piper. Zero API keys required to play.
-- **Bring-your-own-provider.** Plug in OpenAI, Anthropic, Gemini, OpenRouter, Groq, Stability, or ElevenLabs from an in-app settings panel. Keys are encrypted at rest with **AES-256-GCM**.
+- **Local-first by design.** Runs entirely on your machine with Ollama + system TTS (`say` on macOS, `espeak-ng` on Linux). Zero API keys required to play.
+- **Bring-your-own-provider.** Plug in OpenAI, Anthropic, Gemini, OpenRouter, Groq, xAI Grok, Stability, or ElevenLabs from an in-app settings panel. Keys are encrypted at rest with **AES-256-GCM**.
 - **Grounded in the rules.** A built-in **RAG pipeline over the Player's Handbook** (SQLite + `sqlite-vec` + `nomic-embed-text`) means the DM cites actual mechanics, not hallucinated ones.
 - **Multi-device out of the box.** Scan a QR, join from your phone over LAN. Realtime sync via Socket.IO.
 - **Structured AI output.** The DM answers in a parsed `<narrative>` + `<actions>` contract that directly mutates game state — HP, inventory, dice requests, map updates — no brittle prompt parsing tricks.
@@ -30,6 +30,7 @@ A language model drives the fiction, interprets player intent, and emits game-st
 | **Anthropic** | `claude-opus-4`, `claude-3.7-sonnet`, `claude-3.5-sonnet`, `claude-3.5-haiku` |
 | **Google Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` |
 | **OpenRouter / Groq** | any OpenAI-compatible model on the gateway |
+| **xAI Grok** | `grok-4-1-fast-reasoning` (default), same API for chat and Imagine images |
 | **Custom endpoint** | vLLM, LM Studio, LiteLLM, anything OpenAI-shaped |
 
 ### Retrieval-Augmented Generation (RAG)
@@ -41,12 +42,13 @@ Generate maps, tokens, portraits and scene backdrops on the fly.
 - **OpenAI** — `gpt-image-1`, `dall-e-3`
 - **Google Imagen** — `imagen-3.0-generate-002`
 - **Stability** — `sd3.5-large`, `sd3.5-medium`, `core`
+- **xAI Grok Imagine** — `grok-imagine-image`, `grok-imagine-image-pro`
 - **Disabled** — falls back to a procedural canvas with fog-of-war + grid
 
 ### Voice & narration (TTS)
 Every narrative message is speakable, per-message, per-voice.
 
-- **Piper** *(local, neural, offline)* — `.onnx` voices in `data/voices/`
+- **System TTS** *(local, no network, no API tokens)* — macOS **`say`** (output converted to WAV with **`afconvert`**); Linux **`espeak-ng`**. Default Spanish voice on Mac: `Paulina` (`es-mx`). List macOS voices with `say -v '?'`.
 - **OpenAI TTS** — `gpt-4o-mini-tts` with `alloy`, `coral`, `nova`, …
 - **ElevenLabs** — `eleven_multilingual_v2`, `eleven_turbo_v2_5`
 - **Web Speech API** — zero-setup fallback using the OS voice
@@ -96,15 +98,7 @@ To trim **LLM input tokens** per DM turn (env knobs and measurement script), see
 - **[Ollama](https://ollama.com)** running locally at `http://localhost:11434`
   - `ollama pull gemma4:e2b` — default narrator model
   - `ollama pull nomic-embed-text` — embeddings for RAG
-- *(Optional, recommended)* **[Piper TTS](https://github.com/rhasspy/piper)** for offline neural voice:
-  - Place the `piper` binary in your `PATH`.
-  - Drop a voice into `data/voices/`:
-    ```bash
-    mkdir -p data/voices && cd data/voices
-    curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_MX/claude/high/es_MX-claude-high.onnx
-    curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_MX/claude/high/es_MX-claude-high.onnx.json
-    ```
-  - If Piper isn't available, the browser's Web Speech API is used automatically.
+- **TTS local (sin instalación extra en macOS):** el narrador usa el binario **`/usr/bin/say`** y **`afconvert`**, incluidos en el sistema. En **Linux**, instala `espeak-ng` (`apt install espeak-ng` o `brew install espeak-ng`). Si el servidor no puede sintetizar audio, el cliente usa la **Web Speech API** del navegador.
 
 ---
 
@@ -140,12 +134,10 @@ The LAN URL used for the mobile QR is auto-detected by the server.
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` |
 | `DND_MODEL` | `gemma4:e2b` |
 | `DND_EMBED_MODEL` | `nomic-embed-text` |
-| `PIPER_BIN` | `piper` |
-| `PIPER_VOICE` | `es_MX-claude-high` |
-| `PIPER_VOICES_DIR` | `./data/voices` |
+| `SYSTEM_TTS_VOICE` | (opcional) Nombre de voz por defecto para `say` / `espeak-ng` si no configuras otra en ajustes |
 | `PORT` | `3000` |
 | `DND_SECRET` | Seed to encrypt stored API keys. If unset, a random secret is generated at `data/.keyring` |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `STABILITY_API_KEY`, `ELEVENLABS_API_KEY` | Fallbacks if you don't store the key via `/settings` |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `STABILITY_API_KEY`, `ELEVENLABS_API_KEY` | Fallbacks if you don't store the key via `/settings` |
 
 > API keys entered in the UI are encrypted with **AES-256-GCM** using a local keyring (`data/.keyring`). They never leave the machine.
 
@@ -155,14 +147,14 @@ The LAN URL used for the mobile QR is auto-detected by the server.
 
 ```
 app/          Next.js App Router — pages + API routes (/api/…)
-server/       Server-only logic — Ollama, RAG, dice, Piper, DM prompts, Socket.IO, LAN
+server/       Server-only logic — Ollama, RAG, dice, system TTS, DM prompts, Socket.IO, LAN
 lib/          5E engine (rules, Zod schemas) + DB (better-sqlite3 + sqlite-vec)
 components/   Shared UI
 scripts/      one-shot RAG ingest pipeline
-data/         SQLite, caches, assets, Piper voices (gitignored)
+data/         SQLite, caches, assets (gitignored)
 ```
 
-**Key tech:** Next.js 14 · TypeScript · Socket.IO · Tailwind · Framer Motion · better-sqlite3 · sqlite-vec · Ollama · Piper · pdf-lib · Zod.
+**Key tech:** Next.js 14 · TypeScript · Socket.IO · Tailwind · Framer Motion · better-sqlite3 · sqlite-vec · Ollama · system TTS · pdf-lib · Zod.
 
 ---
 

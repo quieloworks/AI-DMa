@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkPiper } from "@/server/piper";
+import { checkSystemTts } from "@/server/system-tts";
 import { synthesizeVoice } from "@/server/providers/voice";
 import { getProvidersConfig } from "@/server/providers/config";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const piper = await checkPiper();
+  const systemTts = await checkSystemTts();
   const cfg = getProvidersConfig();
-  return NextResponse.json({ piper, config: cfg.voice });
+  return NextResponse.json({ systemTts, config: cfg.voice });
 }
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,12 @@ export async function POST(req: NextRequest) {
 
   const result = await synthesizeVoice({ text: body.text, voice: body.voice, emotion: body.emotion });
   if (result.kind === "fallback") {
-    return NextResponse.json({ error: "Proveedor de voz no disponible", details: result.reason, fallback: "browser" }, { status: 503 });
+    // 200 + JSON: el navegador ya tiene fallback (speechSynthesis). 503 ensuciaba logs sin aportar
+    // (caso típico: say/espeak-ng no disponible — ver GET /api/tts).
+    return NextResponse.json(
+      { fallback: "browser", details: result.reason },
+      { status: 200, headers: { "Cache-Control": "no-store" } }
+    );
   }
 
   return new Response(result.body as unknown as ReadableStream, {

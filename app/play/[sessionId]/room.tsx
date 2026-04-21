@@ -143,6 +143,7 @@ export function PlayRoom({
     s.on(
       "chat:message",
       (msg: { role: string; text: string; kind?: string; playerId?: string; originClientId?: string }) => {
+        if (msg.kind === "dm-assistant") return;
         if (msg.originClientId === clientIdRef.current) return;
         const mine = msg.playerId === picked.player_id;
         if (msg.kind === "private" && !mine && msg.role !== "dm") return;
@@ -168,7 +169,9 @@ export function PlayRoom({
       }) => {
         setRecentRolls((prev) => [evt.result, ...prev].slice(0, 12));
         const mine = evt.by.playerId === picked.player_id;
-        if (mine) {
+        // Solo reflejar en el chat la tirada que responde a una petición del DM;
+        // otros dados de la sección no cuentan como acción y no deben llenar el chat.
+        if (mine && evt.requestId) {
           setChat((prev) => [
             ...prev,
             {
@@ -451,10 +454,6 @@ export function PlayRoom({
               data={currentData}
               level={level}
               prof={prof}
-              onRoll={(expr, label) => {
-                roll(expr, label);
-                flashToast(`🎲 ${label ?? expr}`);
-              }}
               onAction={(text) => {
                 sendChat(text, "public", { triggerDm: true });
                 flashToast(text);
@@ -675,13 +674,11 @@ function ActionsPanel({
   data,
   level,
   prof,
-  onRoll,
   onAction,
 }: {
   data: CharData;
   level: number;
   prof: number;
-  onRoll: (expr: string, label?: string) => void;
   onAction: (text: string) => void;
 }) {
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
@@ -698,24 +695,23 @@ function ActionsPanel({
   const rollSkill = (skill: string) => {
     const ability = SKILL_ABILITY[skill.toLowerCase()] ?? "des";
     const mod = abilityMod(totalAbility(abilities, racial, ability)) + prof;
-    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `${skill} (${ability.toUpperCase()})`);
-    onAction(`Intento usar ${skill} (${ability.toUpperCase()}, tirada ${mod >= 0 ? "+" : ""}${mod}).`);
+    onAction(`Intento usar ${skill} (${ability.toUpperCase()}, modificador ${mod >= 0 ? "+" : ""}${mod}).`);
   };
 
   const rollSave = (ability: Ability) => {
     const base = abilityMod(totalAbility(abilities, racial, ability));
     const hasProf = (data.savingThrows ?? []).includes(ability);
     const mod = base + (hasProf ? prof : 0);
-    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `Salvación de ${ability.toUpperCase()}${hasProf ? " ✓" : ""}`);
-    onAction(`Hago una tirada de salvación de ${ability.toUpperCase()} (${mod >= 0 ? "+" : ""}${mod}).`);
+    onAction(`Hago una tirada de salvación de ${ability.toUpperCase()} (${mod >= 0 ? "+" : ""}${mod}${hasProf ? ", con proficiencia" : ""}).`);
   };
 
   const attack = (weapon: { name: string; damage?: string }) => {
     const usesDex = /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina/i.test(weapon.name);
     const ab = usesDex ? "des" : "fue";
     const mod = abilityMod(totalAbility(abilities, racial, ab)) + prof;
-    onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, `Ataque con ${weapon.name}`);
-    onAction(`Ataco con ${weapon.name}${weapon.damage ? ` (daño ${weapon.damage})` : ""}.`);
+    onAction(
+      `Ataco con ${weapon.name} (bono al ataque ${mod >= 0 ? "+" : ""}${mod})${weapon.damage ? `, daño ${weapon.damage}` : ""}.`
+    );
   };
 
   const castSpell = (s: { name: string; level: number }) => {
@@ -729,7 +725,7 @@ function ActionsPanel({
   return (
     <div className="space-y-3">
       <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-        Cada acción tira el dado correspondiente y avisa al DM en el chat.
+        Cada acción avisa al DM en el chat. Si pide una tirada, usa la sección dados o reporta el resultado (dado físico); no se lanza solo al pulsar.
       </p>
 
       <div className="card">
@@ -740,7 +736,6 @@ function ActionsPanel({
             subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0))}
             onClick={() => {
               const mod = abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0);
-              onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, "Iniciativa");
               onAction(`Tiro iniciativa (${mod >= 0 ? "+" : ""}${mod}).`);
             }}
           />
@@ -749,8 +744,7 @@ function ActionsPanel({
             subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "fue")) + prof)}
             onClick={() => {
               const mod = abilityMod(totalAbility(abilities, racial, "fue")) + prof;
-              onRoll(`1d20${mod >= 0 ? `+${mod}` : mod}`, "Ataque sin arma");
-              onAction("Ataco sin arma.");
+              onAction(`Ataco sin arma (${mod >= 0 ? "+" : ""}${mod}).`);
             }}
           />
         </div>

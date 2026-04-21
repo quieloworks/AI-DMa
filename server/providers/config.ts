@@ -44,20 +44,38 @@ const DEFAULTS: ProvidersConfig = {
     style: "vivid",
   },
   voice: {
-    provider: "piper",
+    provider: "system",
     model: "",
-    voice: "es_MX-claude-high",
+    voice: process.platform === "darwin" ? "Paulina" : "es-mx",
     format: "wav",
   },
 };
 
 export function getProvidersConfig(): ProvidersConfig {
   const stored = getSetting<Partial<ProvidersConfig>>(PROVIDERS_KEY, {});
+  const voice = migrateVoiceConfig(stored.voice);
   return {
     chat: { ...DEFAULTS.chat, ...(stored.chat ?? {}) },
     image: { ...DEFAULTS.image, ...(stored.image ?? {}) },
-    voice: { ...DEFAULTS.voice, ...(stored.voice ?? {}) },
+    voice,
   };
+}
+
+/** Migra proveedor Piper y voces .onnx a TTS del sistema (say / espeak-ng). */
+function migrateVoiceConfig(stored: Partial<VoiceConfig> | undefined): VoiceConfig {
+  const raw = { ...DEFAULTS.voice, ...(stored ?? {}) };
+  const provider = raw.provider as string;
+  if (provider === "piper") {
+    const legacyVoice = raw.voice;
+    const looksPiper =
+      legacyVoice === "es_MX-claude-high" || legacyVoice.endsWith(".onnx") || !legacyVoice.trim();
+    return {
+      ...raw,
+      provider: "system",
+      voice: looksPiper ? DEFAULTS.voice.voice : legacyVoice,
+    } as VoiceConfig;
+  }
+  return raw as VoiceConfig;
 }
 
 export function saveProvidersConfig(update: Partial<ProvidersConfig>) {
@@ -77,6 +95,7 @@ export type KeyProvider =
   | "gemini"
   | "openrouter"
   | "groq"
+  | "grok"
   | "stability"
   | "elevenlabs"
   | "custom";
@@ -87,6 +106,7 @@ const ENV_FALLBACK: Record<KeyProvider, string | undefined> = {
   gemini: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
   openrouter: process.env.OPENROUTER_API_KEY,
   groq: process.env.GROQ_API_KEY,
+  grok: process.env.XAI_API_KEY,
   stability: process.env.STABILITY_API_KEY,
   elevenlabs: process.env.ELEVENLABS_API_KEY,
   custom: process.env.DND_CUSTOM_API_KEY,
@@ -123,6 +143,7 @@ export function listConfiguredKeys(): Array<{ provider: KeyProvider; source: "db
     "gemini",
     "openrouter",
     "groq",
+    "grok",
     "stability",
     "elevenlabs",
     "custom",

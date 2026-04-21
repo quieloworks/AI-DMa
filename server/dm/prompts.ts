@@ -213,7 +213,9 @@ JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terra
 player_id: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
-Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.`;
+Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.
+
+El chat del grupo solo muestra lo de <narrativa>; <acciones> es solo para la app/DM (nunca lo leas en voz alta al grupo).`;
 
 const ADVENTURE_DIRECTIVE = `MÓDULO PDF = canon de ficción: ubicaciones, NPCs, encuentros y botín como en el texto; improvisar solo huecos coherentes; no contradecir hechos; fragmentos [A#] prevalecen; 5E gobierna mecánica, el módulo la trama.`;
 

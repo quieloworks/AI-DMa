@@ -18,6 +18,18 @@ import { getIo } from "@/server/io-bus";
 
 export const runtime = "nodejs";
 
+function llmErrorMessage(err: unknown): string {
+  const e = err as Error & { cause?: NodeJS.ErrnoException & { address?: string; port?: number } };
+  const c = e?.cause;
+  if (c && typeof c === "object" && "code" in c && c.code === "ECONNREFUSED") {
+    if (c.port === 11434) {
+      return "Ollama no está en marcha (puerto 11434 rechazado). Arranca Ollama o define OLLAMA_HOST si usa otro host/puerto.";
+    }
+    return `Conexión rechazada a ${c.address ?? "servidor"}:${c.port ?? "?"}. Comprueba que el proveedor de chat local esté activo.`;
+  }
+  return e?.message ?? String(err);
+}
+
 type ChatReq = {
   sessionId: string;
   mode: "auto" | "assistant";
@@ -206,19 +218,8 @@ export async function POST(req: NextRequest) {
       body.text,
       Date.now()
     );
-    try {
-      const io = getIo();
-      if (io) {
-        io.to(`session:${body.sessionId}`).emit("chat:message", {
-          sessionId: body.sessionId,
-          role: "player",
-          playerId: body.playerId,
-          kind: body.mode === "assistant" ? "dm-assistant" : "public",
-          text: body.text,
-          originClientId: body.clientId,
-        });
-      }
-    } catch {}
+    // La difusión del texto del jugador la hace ya `chat:send` en el cliente (socket);
+    // repetir aquí duplica el mensaje en la crónica del DM y del grupo.
   }
 
   const encoder = new TextEncoder();
@@ -232,15 +233,16 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(tok));
         }
       } catch (err) {
-        controller.enqueue(encoder.encode(`\n[error] ${(err as Error).message}`));
+        controller.enqueue(encoder.encode(`\n[error] ${llmErrorMessage(err)}`));
       } finally {
-        db.prepare(
-          `INSERT INTO session_message(session_id, role, kind, content, created_at) VALUES(?, 'dm', ?, ?, ?)`
-        ).run(body.sessionId, body.mode === "assistant" ? "dm-assistant" : "public", fullText, Date.now());
-        db.prepare("UPDATE session SET turn = turn + 1, updated_at = ? WHERE id = ?").run(Date.now(), body.sessionId);
-
         try {
           const parsed = parseDmResponse(fullText);
+          const cleanNarrative = parsed.narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
+          const persistDmContent = body.mode === "assistant" ? fullText : cleanNarrative;
+          db.prepare(
+            `INSERT INTO session_message(session_id, role, kind, content, created_at) VALUES(?, 'dm', ?, ?, ?)`
+          ).run(body.sessionId, body.mode === "assistant" ? "dm-assistant" : "public", persistDmContent, Date.now());
+          db.prepare("UPDATE session SET turn = turn + 1, updated_at = ? WHERE id = ?").run(Date.now(), body.sessionId);
           const nextState: PersistedState = { ...state };
           if (action === "opening") nextState.openingDone = true;
 
@@ -345,13 +347,23 @@ export async function POST(req: NextRequest) {
           try {
             const io = getIo();
             if (io) {
-              const clean = parsed.narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
-              if (clean) {
+              if (body.mode === "assistant") {
+                if (fullText.trim()) {
+                  io.to(`session:${body.sessionId}:dm`).emit("chat:message", {
+                    sessionId: body.sessionId,
+                    role: "dm",
+                    kind: "dm-assistant",
+                    text: fullText,
+                    originClientId: body.clientId,
+                    id: `dm:${Date.now().toString(36)}`,
+                  });
+                }
+              } else if (cleanNarrative) {
                 io.to(`session:${body.sessionId}`).emit("chat:message", {
                   sessionId: body.sessionId,
                   role: "dm",
-                  kind: body.mode === "assistant" ? "dm-assistant" : "public",
-                  text: clean,
+                  kind: "public",
+                  text: cleanNarrative,
                   originClientId: body.clientId,
                   id: `dm:${Date.now().toString(36)}`,
                 });

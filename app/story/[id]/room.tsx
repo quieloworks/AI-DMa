@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { parseDmResponse } from "./parse";
+import { parseDmResponse, streamingNarrativePreview } from "./parse";
 import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
 
@@ -48,7 +48,7 @@ type ChatBubble = {
   text: string;
   id: string;
   playerName?: string;
-  kind?: "public" | "private";
+  kind?: "public" | "private" | "dm-assistant";
 };
 
 type AdventureIngest = {
@@ -107,12 +107,20 @@ export function StoryRoom({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [chat, setChat] = useState<ChatBubble[]>(() =>
-    initialMessages.map((m) => ({
-      id: String(m.id),
-      role: m.role as ChatBubble["role"],
-      text: m.content,
-      kind: m.kind === "private" ? "private" : "public",
-    }))
+    initialMessages.map((m) => {
+      const kind: ChatBubble["kind"] =
+        m.kind === "private" ? "private" : m.kind === "dm-assistant" ? "dm-assistant" : "public";
+      let text = m.content;
+      if (m.role === "dm" && kind === "public") {
+        text = parseDmResponse(m.content).narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
+      }
+      return {
+        id: String(m.id),
+        role: m.role as ChatBubble["role"],
+        text,
+        kind,
+      };
+    })
   );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -146,6 +154,15 @@ export function StoryRoom({
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const playerMap = useMemo(() => Object.fromEntries(players.map((p) => [p.playerId, p])), [players]);
+  /** Crónica compartida: narrativa y jugadores; sin susurros ni asistente técnico */
+  const chronicle = useMemo(
+    () => chat.filter((m) => m.kind !== "private" && m.kind !== "dm-assistant"),
+    [chat]
+  );
+  /** Respuestas del asistente IA (solo DM; incluye bloque mecánico / acciones) */
+  const assistantFeed = useMemo(() => chat.filter((m) => m.kind === "dm-assistant"), [chat]);
+  /** Solo mensajes con kind private (DM ↔ jugador) */
+  const whisperFeed = useMemo(() => chat.filter((m) => m.kind === "private"), [chat]);
   const chatEnd = useRef<HTMLDivElement>(null);
   const openingAttempted = useRef(false);
   const speakQueueRef = useRef<string | null>(null);
@@ -163,7 +180,12 @@ export function StoryRoom({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, emotion: "epica" }),
       });
-      if (res.ok) {
+      const ct = res.headers.get("content-type") ?? "";
+      if (res.ok && ct.includes("application/json")) {
+        const payload = (await res.json()) as { fallback?: string };
+        if (payload.fallback !== "browser") return;
+        // servidor sin TTS (say/espeak-ng no disponible): seguir a speechSynthesis abajo
+      } else if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
@@ -220,7 +242,19 @@ export function StoryRoom({
     s.on(
       "chat:message",
       (msg: { role: string; text: string; playerId?: string; kind?: string; originClientId?: string; id?: string }) => {
-        if (msg.kind === "dm-assistant") return;
+        if (msg.kind === "dm-assistant") {
+          if (msg.originClientId === clientIdRef.current) return;
+          setChat((prev) => [
+            ...prev,
+            {
+              id: msg.id ?? randomId(),
+              role: "dm",
+              text: msg.text,
+              kind: "dm-assistant",
+            },
+          ]);
+          return;
+        }
         if (msg.role === "dm" && msg.originClientId === clientIdRef.current) return;
         setChat((prev) => [
           ...prev,
@@ -232,7 +266,7 @@ export function StoryRoom({
             kind: (msg.kind as "public" | "private") ?? "public",
           },
         ]);
-        if (msg.role === "dm" && autoSpeak && msg.text) {
+        if (msg.role === "dm" && autoSpeak && msg.text && msg.kind !== "private") {
           const id = msg.id ?? randomId();
           speakQueueRef.current = null;
           void speakText(id, msg.text);
@@ -338,8 +372,12 @@ export function StoryRoom({
       }
 
       const dmId = randomId();
-      setChat((prev) => [...prev, { id: dmId, role: "dm", text: "" }]);
-      if (autoSpeak) speakQueueRef.current = dmId;
+      const dmBubble: ChatBubble =
+        story.mode === "assistant"
+          ? { id: dmId, role: "dm", text: "", kind: "dm-assistant" }
+          : { id: dmId, role: "dm", text: "" };
+      setChat((prev) => [...prev, dmBubble]);
+      if (autoSpeak && story.mode !== "assistant") speakQueueRef.current = dmId;
 
       try {
         const res = await fetch("/api/chat", {
@@ -366,7 +404,8 @@ export function StoryRoom({
           if (done) break;
           const piece = decoder.decode(value, { stream: true });
           buffer += piece;
-          setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: buffer } : m)));
+          const preview = story.mode === "assistant" ? buffer : streamingNarrativePreview(buffer);
+          setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: preview } : m)));
         }
         const parsed = parseDmResponse(buffer);
         const actObj = parsed.actions as Record<string, unknown>;
@@ -389,7 +428,8 @@ export function StoryRoom({
         setTurnCounter((t) => t + 1);
 
         const clean = parsed.narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
-        setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: clean } : m)));
+        const finalDmText = story.mode === "assistant" ? buffer.trim() : clean;
+        setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: finalDmText } : m)));
         if (payload.action === "opening") setOpeningDone(true);
 
         if (speakQueueRef.current === dmId && clean) {
@@ -804,20 +844,22 @@ export function StoryRoom({
         <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
           <p className="label">Crónica</p>
           <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-            {chat.length} mensajes
+            {chronicle.length} en grupo
+            {assistantFeed.length > 0 ? ` · ${assistantFeed.length} asistente` : ""}
+            {whisperFeed.length > 0 ? ` · ${whisperFeed.length} susurros` : ""}
           </span>
         </div>
 
         {player && <AudioPlayer player={player} onToggle={togglePlay} onStop={stopPlay} onSeek={seekTo} />}
 
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
-          {chat.map((m) => (
+          {chronicle.map((m) => (
             <div key={m.id}>
               {m.role === "dm" ? (
                 <DmBubble
                   id={m.id}
                   text={m.text}
-                  isPrivate={m.kind === "private"}
+                  isPrivate={false}
                   target={m.playerName}
                   onSpeak={() => speakText(m.id, m.text)}
                   active={player?.id === m.id}
@@ -832,6 +874,60 @@ export function StoryRoom({
               )}
             </div>
           ))}
+          {assistantFeed.length > 0 && (
+            <div
+              className="rounded-lg p-3"
+              style={{
+                border: "0.5px solid var(--color-border-strong)",
+                background: "var(--color-bg-tertiary)",
+              }}
+            >
+              <p className="label mb-2" style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
+                Solo DM — asistente (narrativa breve + bloque &lt;acciones&gt;)
+              </p>
+              <div className="space-y-3">
+                {assistantFeed.map((m) => (
+                  <pre
+                    key={m.id}
+                    className="whitespace-pre-wrap break-words text-xs"
+                    style={{ color: "var(--color-text-primary)", fontFamily: "ui-monospace, monospace", margin: 0 }}
+                  >
+                    {m.text}
+                  </pre>
+                ))}
+              </div>
+            </div>
+          )}
+          {whisperFeed.length > 0 && (
+            <div className="rounded-lg p-3" style={{ border: "0.5px solid var(--color-accent)", background: "var(--color-accent-bg)" }}>
+              <p className="label mb-2" style={{ fontSize: 11, color: "var(--color-accent)" }}>
+                🔒 Susurros (no van al chat del grupo)
+              </p>
+              <div className="space-y-3">
+                {whisperFeed.map((m) => (
+                  <div key={m.id}>
+                    {m.role === "dm" ? (
+                      <DmBubble
+                        id={m.id}
+                        text={m.text}
+                        isPrivate
+                        target={m.playerName}
+                        onSpeak={() => speakText(m.id, m.text)}
+                        active={player?.id === m.id}
+                        playing={player?.id === m.id && (player?.playing ?? false)}
+                      />
+                    ) : m.role === "system" ? (
+                      <p className="text-xs italic" style={{ color: "var(--color-text-hint)" }}>
+                        {m.text}
+                      </p>
+                    ) : (
+                      <PlayerBubble name={m.playerName ?? "Jugador"} text={m.text} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {streaming && (
             <p className="text-xs italic" style={{ color: "var(--color-text-hint)" }}>
               el DM está escribiendo…

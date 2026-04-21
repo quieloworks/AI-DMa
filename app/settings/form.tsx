@@ -36,7 +36,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       <Pair label="Efectos de sonido">
         <Toggle value={s.sfx ? "on" : "off"} options={[{ v: "on", l: "Activados" }, { v: "off", l: "Silencio" }]} onChange={(v) => setS({ ...s, sfx: v === "on" })} />
       </Pair>
-      <Pair label="Voz (Piper)" help="Modelo ONNX en data/voices/">
+      <Pair label="Voz (nombre)" help="Nombre de voz del sistema (p. ej. Paulina en macOS). Se usa si el proveedor de voz es «Voz del sistema».">
         <input className="input" value={s.voice} onChange={(e) => setS({ ...s, voice: e.target.value })} />
       </Pair>
 
