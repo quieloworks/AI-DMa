@@ -13,6 +13,7 @@ import {
 import { retrieveRules } from "@/server/rag";
 import { retrieveAdventure, getAdventureOutline, hasAdventure } from "@/server/adventure";
 import { applyDmActions } from "@/server/dm/apply-actions";
+import { getDmRagBudget } from "@/server/dm/prompt-budget";
 import { getIo } from "@/server/io-bus";
 
 export const runtime = "nodejs";
@@ -143,6 +144,13 @@ export async function POST(req: NextRequest) {
     seed: storyData.seed,
     adventureOutline,
     adventureSourceName: storyData.sourceFileName ?? null,
+    combat: state.combat === true,
+  };
+
+  const ragBudget = getDmRagBudget();
+  const ragCaps = {
+    rulesChunkChars: ragBudget.rulesChunkChars,
+    adventureChunkChars: ragBudget.adventureChunkChars,
   };
 
   const action: ChatReq["action"] = body.action ?? (body.text && body.text.trim() ? "player" : "continue");
@@ -172,11 +180,11 @@ export async function POST(req: NextRequest) {
     retrievalQuery = body.text ?? "";
   }
 
-  const rulesCtx = await retrieveRules(retrievalQuery || snap.storyTitle, { k: 5 });
+  const rulesCtx = await retrieveRules(retrievalQuery || snap.storyTitle, { k: ragBudget.rulesK });
 
   if (adventureLoaded) {
     try {
-      const advChunks = await retrieveAdventure(storyId, retrievalQuery || snap.storyTitle, { k: 6 });
+      const advChunks = await retrieveAdventure(storyId, retrievalQuery || snap.storyTitle, { k: ragBudget.adventureK });
       snap.adventureChunks = advChunks;
     } catch (err) {
       console.warn("retrieveAdventure:", (err as Error).message);
@@ -185,8 +193,8 @@ export async function POST(req: NextRequest) {
 
   const messages =
     body.mode === "auto"
-      ? buildAutoDmPrompt(snap, rulesCtx, turnAction)
-      : buildAssistantDmPrompt(snap, rulesCtx, body.text ?? "Continúa ayudando al DM.");
+      ? buildAutoDmPrompt(snap, rulesCtx, turnAction, ragCaps)
+      : buildAssistantDmPrompt(snap, rulesCtx, body.text ?? "Continúa ayudando al DM.", ragCaps);
 
   if (action === "player" && body.text && body.text.trim()) {
     db.prepare(

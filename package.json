@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "next lint",
-    "ingest:handbook": "tsx scripts/ingest-handbook.ts"
+    "ingest:handbook": "tsx scripts/ingest-handbook.ts",
+    "measure:dm-prompts": "tsx scripts/measure-dm-prompts.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.5.0",

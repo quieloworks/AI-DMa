@@ -86,6 +86,8 @@ Actions   → mutate game state (HP, items, dice requests, map)
 Socket.IO fan-out → every connected device
 ```
 
+To trim **LLM input tokens** per DM turn (env knobs and measurement script), see [docs/llm-token-reduction-runbook.md](docs/llm-token-reduction-runbook.md).
+
 ---
 
 ## Requirements
