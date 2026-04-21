@@ -22,10 +22,20 @@ export type SessionSnapshot = {
   sceneTags?: string[];
   recentLog?: string[];
   tone?: number;
+  difficulty?: Difficulty;
   initiative?: Array<{ player_id: string; value: number }>;
   openingDone?: boolean;
   seed?: string;
 };
+
+export type Difficulty = "facil" | "medio" | "dificil" | "experto";
+
+export const DIFFICULTY_OPTIONS: Difficulty[] = ["facil", "medio", "dificil", "experto"];
+
+export function normalizeDifficulty(raw: unknown): Difficulty {
+  if (raw === "facil" || raw === "medio" || raw === "dificil" || raw === "experto") return raw;
+  return "medio";
+}
 
 export type TurnAction =
   | { kind: "opening" }
@@ -69,6 +79,36 @@ function renderInitiative(snap: SessionSnapshot): string {
   if (!snap.initiative?.length) return "";
   const sorted = [...snap.initiative].sort((a, b) => b.value - a.value);
   return `INICIATIVA ACTIVA: ${sorted.map((i) => `${i.player_id}(${i.value})`).join(" > ")}`;
+}
+
+function difficultyGuide(difficulty: Difficulty | undefined): { label: string; directive: string } {
+  const d = normalizeDifficulty(difficulty);
+  if (d === "facil") {
+    return {
+      label: "Fácil",
+      directive:
+        "DIFICULTAD: Fácil. Los jugadores son aprendices o quieren una tarde relajada.\n- CD típicas bajas: pruebas de habilidad CD 8-11, ataques de enemigos con +3/+4, CDs de salvación 10-11.\n- Encuentros con 1-2 criaturas de CR inferior al nivel del grupo (o equivalente ≤ 1/4 del umbral 'medio' del DMG).\n- Enemigos con tácticas simples, sin sinergias crueles; priorizan blancos obvios.\n- Recursos generosos: pistas claras, NPCs colaboradores, botín de pociones/curaciones frecuente.\n- Describe el riesgo, pero deja márgenes de recuperación. Concede inspiración cuando un jugador narre bien.\n- Nunca un personaje debería caer a menos de que falle varias veces seguidas; prefiere acciones que lo dejen herido pero consciente.",
+    };
+  }
+  if (d === "dificil") {
+    return {
+      label: "Difícil",
+      directive:
+        "DIFICULTAD: Difícil. Los jugadores buscan un reto genuino.\n- CDs habituales: habilidad CD 15-18, ataques enemigos +6/+8, salvaciones CD 14-16.\n- Encuentros pensados al límite 'difícil' del DMG: múltiples enemigos o un élite con CR superior al nivel.\n- Los enemigos usan tácticas óptimas: foco en objetivos frágiles, cobertura, concentración, sinergias, emboscadas.\n- Entorno hostil: terreno difícil, trampas con CD altas, recursos limitados (pocas pociones, descanso interrumpido).\n- Sé avaro con la información gratuita; exige tiradas para pistas. Mantén consecuencias estrictas.\n- Los críticos enemigos y fallos masivos pueden dejar a un PC a 0 HP; respeta las reglas de muerte sin suavizar.",
+    };
+  }
+  if (d === "experto") {
+    return {
+      label: "Experto",
+      directive:
+        "DIFICULTAD: Experto. Es una partida de veteranos que buscan un desafío brutal y justo.\n- CDs punitivas: habilidad CD 17-22, ataques enemigos +8/+11, salvaciones CD 16-19.\n- Encuentros al límite 'mortal' del DMG o ligeramente por encima; combate como ajedrez con piezas que matan.\n- Enemigos con tácticas coordinadas, acciones legendarias, guardia, concentración cruzada, interrupciones y control de área.\n- Recursos extremadamente escasos; descansos largos arriesgados; objetos mágicos selectivos y pocos.\n- El grupo debe planificar: recompensa la preparación, explora debilidades del enemigo, penaliza la improvisación torpe.\n- La muerte permanente es una posibilidad real. No suavices las reglas; haz cumplir concentración, iniciativa, reacciones, componentes.",
+    };
+  }
+  return {
+    label: "Medio",
+    directive:
+      "DIFICULTAD: Medio (5E por defecto).\n- CDs centrales: habilidad CD 12-14, ataques enemigos +5/+6, salvaciones CD 13.\n- Encuentros balanceados según la guía del DMG ('medio' o 'difícil' ocasional).\n- Enemigos con tácticas sensatas pero no óptimas; cometen errores aprovechables.\n- Recursos equilibrados: algunas pociones, descansos posibles con costo narrativo.\n- Mantén el reto sin castigar innecesariamente; el grupo puede salir herido pero funcional si juega con cuidado.",
+  };
 }
 
 function toneGuide(tone: number | undefined): { label: string; directive: string } {
@@ -178,6 +218,8 @@ REGLAS DEL FORMATO:
 
 function baseSystem(snap: SessionSnapshot, rulesContext: RetrievedChunk[], toneLine: string): string {
   const init = renderInitiative(snap);
+  const diff = difficultyGuide(snap.difficulty);
+  const diffLine = `${diff.directive}\n(Dificultad seleccionada: ${diff.label})`;
   return `Eres un Dungeon Master experto de D&D 5E. Tu misión es conducir a un grupo real a través de una historia memorable, justa y emocionante.
 
 HISTORIA: ${snap.storyTitle}
@@ -194,6 +236,8 @@ REGLAS RELEVANTES DEL HANDBOOK (usa como verdad):
 ${renderRulesContext(rulesContext)}
 
 ${toneLine}
+
+${diffLine}
 
 ${ENGAGEMENT_DIRECTIVES}
 
@@ -266,6 +310,7 @@ Sé explícito en la CD y el tipo de tirada (habilidad/atributo/ataque/salvació
 
 export function buildAssistantDmPrompt(snap: SessionSnapshot, rulesContext: RetrievedChunk[], dmMessage: string) {
   const { label, directive } = toneGuide(snap.tone);
+  const diff = difficultyGuide(snap.difficulty);
   const system = `Eres el asistente técnico del Dungeon Master humano en una partida de D&D 5E.
 El DM te da instrucciones; tu rol es ayudarle calculando reglas, listando opciones de ataque/defensa, sugiriendo CDs, manteniendo iniciativa y estado consistente. NO narras al grupo; respondes breve, técnico y útil.
 
@@ -280,6 +325,8 @@ REGLAS RELEVANTES:
 ${renderRulesContext(rulesContext)}
 
 ${directive}\n(Tono seleccionado: ${label} — ${snap.tone ?? 50}/100)
+
+${diff.directive}\n(Dificultad seleccionada: ${diff.label})
 
 ${COMBAT_DIRECTIVES}
 ${MECHANICAL_DIRECTIVES}

@@ -25,7 +25,12 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         <div>
           <span className="badge mb-3">Hoja de personaje</span>
           <h1>{ch.name}</h1>
-          <p style={{ color: "var(--color-text-secondary)" }}>
+          {ch.playerName && (
+            <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+              Jugador: {ch.playerName}
+            </p>
+          )}
+          <p className="mt-1" style={{ color: "var(--color-text-secondary)" }}>
             {ch.race} · {ch.class} nivel {ch.level} · {ch.background}
           </p>
         </div>

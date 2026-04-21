@@ -5,6 +5,8 @@ import {
   buildAutoDmPrompt,
   buildAssistantDmPrompt,
   parseDmResponse,
+  normalizeDifficulty,
+  type Difficulty,
   type SessionSnapshot,
   type TurnAction,
 } from "@/server/dm/prompts";
@@ -22,6 +24,7 @@ type ChatReq = {
   playerName?: string;
   text?: string;
   tone?: number;
+  difficulty?: Difficulty | string;
   clientId?: string;
 };
 
@@ -49,6 +52,7 @@ export async function POST(req: NextRequest) {
     sceneTags?: string[];
     sceneImage?: string;
     tone?: number;
+    difficulty?: Difficulty;
     openingDone?: boolean;
     initiative?: Array<{ player_id: string; value: number }>;
   };
@@ -60,6 +64,9 @@ export async function POST(req: NextRequest) {
 
   if (typeof body.tone === "number" && Number.isFinite(body.tone)) {
     state.tone = Math.max(0, Math.min(100, Math.round(body.tone)));
+  }
+  if (typeof body.difficulty === "string") {
+    state.difficulty = normalizeDifficulty(body.difficulty);
   }
 
   const playerIds = db
@@ -106,6 +113,7 @@ export async function POST(req: NextRequest) {
     players,
     recentLog: state.recentLog ?? [],
     tone: state.tone ?? 50,
+    difficulty: normalizeDifficulty(state.difficulty),
     initiative: state.initiative,
     openingDone: state.openingDone,
     seed: storyData.seed,

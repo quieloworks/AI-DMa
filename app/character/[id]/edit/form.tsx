@@ -38,6 +38,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
     const knownSpells = parseSpells(spellsRaw);
     const payload: Partial<Character> = {
       name: draft.name,
+      playerName: draft.playerName,
       level: draft.level,
       race: draft.race,
       class: draft.class,
@@ -71,6 +72,13 @@ export function EditCharacterForm({ character }: { character: Character }) {
         <div className="grid grid-cols-2 gap-3">
           <Field label="Nombre">
             <input className="input mt-2" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
+          </Field>
+          <Field label="Jugador (real)">
+            <input
+              className="input mt-2"
+              value={draft.playerName ?? ""}
+              onChange={(e) => patch({ playerName: e.target.value })}
+            />
           </Field>
           <Field label="Nivel">
             <input

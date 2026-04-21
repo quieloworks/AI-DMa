@@ -6,6 +6,32 @@ import { parseDmResponse } from "./parse";
 import { MapCanvas } from "./map";
 import { QrPanel } from "./qr";
 
+type Difficulty = "facil" | "medio" | "dificil" | "experto";
+const DIFFICULTY_VALUES: Difficulty[] = ["facil", "medio", "dificil", "experto"];
+const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  facil: "Fácil",
+  medio: "Medio",
+  dificil: "Difícil",
+  experto: "Experto",
+};
+const DIFFICULTY_SUB: Record<Difficulty, string> = {
+  facil: "Tarde relajada · CDs bajas, enemigos indulgentes",
+  medio: "Balanceado · CDs estándar 5E",
+  dificil: "Exigente · tácticas óptimas, recursos escasos",
+  experto: "Brutal · muerte permanente posible",
+};
+const DIFFICULTY_COLOR: Record<Difficulty, string> = {
+  facil: "hsl(150, 55%, 55%)",
+  medio: "hsl(210, 60%, 55%)",
+  dificil: "hsl(30, 80%, 55%)",
+  experto: "hsl(0, 70%, 55%)",
+};
+
+function normalizeDifficulty(raw: unknown): Difficulty {
+  if (raw === "facil" || raw === "medio" || raw === "dificil" || raw === "experto") return raw;
+  return "medio";
+}
+
 type Player = {
   playerId: string;
   token: string;
@@ -29,6 +55,7 @@ type InitialState = {
   sceneTags?: string[];
   sceneImage?: string;
   tone?: number;
+  difficulty?: Difficulty | string;
   openingDone?: boolean;
   autoSpeak?: boolean;
 };
@@ -84,6 +111,7 @@ export function StoryRoom({
   const [tone, setTone] = useState<number>(() =>
     typeof initialState.tone === "number" ? Math.max(0, Math.min(100, initialState.tone)) : 50
   );
+  const [difficulty, setDifficulty] = useState<Difficulty>(() => normalizeDifficulty(initialState.difficulty));
   const [openingDone, setOpeningDone] = useState<boolean>(initialState.openingDone === true);
   const [whisperTo, setWhisperTo] = useState<string>("all");
   const [autoSpeak, setAutoSpeak] = useState<boolean>(initialState.autoSpeak === true);
@@ -296,6 +324,7 @@ export function StoryRoom({
             playerName: payload.playerName,
             text: payload.text ?? "",
             tone,
+            difficulty,
             clientId: clientIdRef.current,
           }),
         });
@@ -331,7 +360,7 @@ export function StoryRoom({
         setStreaming(false);
       }
     },
-    [sessionId, story.mode, streaming, tone, autoSpeak, speakText]
+    [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText]
   );
 
   useEffect(() => {
@@ -394,6 +423,11 @@ export function StoryRoom({
   async function persistTone(next: number) {
     setTone(next);
     await persistState({ tone: next });
+  }
+
+  async function persistDifficulty(next: Difficulty) {
+    setDifficulty(next);
+    await persistState({ difficulty: next });
   }
 
   async function toggleAutoSpeak() {
@@ -462,6 +496,8 @@ export function StoryRoom({
           <DmSettingsDrawer
             tone={tone}
             onTone={persistTone}
+            difficulty={difficulty}
+            onDifficulty={persistDifficulty}
             streaming={streaming}
             autoSpeak={autoSpeak}
             onToggleAutoSpeak={toggleAutoSpeak}
@@ -671,12 +707,16 @@ export function StoryRoom({
 function DmSettingsDrawer({
   tone,
   onTone,
+  difficulty,
+  onDifficulty,
   streaming,
   autoSpeak,
   onToggleAutoSpeak,
 }: {
   tone: number;
   onTone: (v: number) => void;
+  difficulty: Difficulty;
+  onDifficulty: (d: Difficulty) => void;
   streaming: boolean;
   autoSpeak: boolean;
   onToggleAutoSpeak: () => void;
@@ -692,13 +732,14 @@ function DmSettingsDrawer({
     >
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
         <ToneDial value={tone} onChange={onTone} disabled={streaming} />
+        <DifficultyDial value={difficulty} onChange={onDifficulty} disabled={streaming} />
         <div
-          className="flex items-center justify-between rounded-lg px-4 py-3"
+          className="flex items-center justify-between rounded-lg px-4 py-3 md:col-span-2"
           style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-tertiary)" }}
         >
           <div>
             <p className="label">Audio automático</p>
-            <p className="text-xs" style={{ color: "var(--color-text-hint)", maxWidth: 220 }}>
+            <p className="text-xs" style={{ color: "var(--color-text-hint)", maxWidth: 280 }}>
               {autoSpeak
                 ? "El DM narrará en voz alta cada nueva narrativa."
                 : "Usa el botón 🔊 de cada mensaje para escucharlo."}
@@ -731,6 +772,68 @@ function DmSettingsDrawer({
             />
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DifficultyDial({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Difficulty;
+  onChange: (v: Difficulty) => void;
+  disabled?: boolean;
+}) {
+  const idx = Math.max(0, DIFFICULTY_VALUES.indexOf(value));
+  return (
+    <div
+      className="rounded-lg px-4 py-3"
+      style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-tertiary)" }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="label">Dificultad</p>
+          <p className="text-sm" style={{ color: DIFFICULTY_COLOR[value] }}>
+            {DIFFICULTY_LABELS[value]}
+          </p>
+        </div>
+        <span className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
+          {idx + 1}/{DIFFICULTY_VALUES.length}
+        </span>
+      </div>
+      <div className="mt-3">
+        <input
+          type="range"
+          min={0}
+          max={DIFFICULTY_VALUES.length - 1}
+          step={1}
+          value={idx}
+          disabled={disabled}
+          onChange={(e) => {
+            const next = DIFFICULTY_VALUES[Number(e.target.value)] ?? "medio";
+            onChange(next);
+          }}
+          style={{
+            width: "100%",
+            accentColor: DIFFICULTY_COLOR[value],
+            height: 4,
+            borderRadius: 999,
+            appearance: "none",
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        />
+        <div className="mt-1 flex justify-between text-[10px]" style={{ color: "var(--color-text-hint)" }}>
+          {DIFFICULTY_VALUES.map((d) => (
+            <span key={d} style={{ color: d === value ? DIFFICULTY_COLOR[d] : undefined }}>
+              {DIFFICULTY_LABELS[d].toLowerCase()}
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+          {DIFFICULTY_SUB[value]}
+        </p>
       </div>
     </div>
   );

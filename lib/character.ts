@@ -36,6 +36,7 @@ export const SKILLS: Record<string, { label: string; ability: Ability }> = {
 export const CharacterSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
+  playerName: z.string().optional(),
   level: z.number().int().min(1).max(20),
   race: z.string(),
   subrace: z.string().optional(),
@@ -139,6 +140,12 @@ export function pointBuyTotal(scores: Record<Ability, number>): number {
   return (Object.values(scores) as number[]).reduce((acc, v) => acc + (POINT_BUY_COST[v] ?? 99), 0);
 }
 
+export const SKILL_KEYS = Object.keys(SKILLS);
+
+export type EquipmentItem = { name: string; qty: number; note?: string };
+export type EquipmentOption = { id: string; label: string; items: EquipmentItem[] };
+export type EquipmentChoice = { id: string; label: string; options: EquipmentOption[] };
+
 export type ClassBasics = {
   id: string;
   label: string;
@@ -147,22 +154,602 @@ export type ClassBasics = {
   savingThrows: [Ability, Ability];
   armorProficiencies: string[];
   weaponProficiencies: string[];
+  toolProficiencies?: string[];
   spellcasting?: { ability: Ability; caster: "full" | "half" | "third" | "pact" };
+  skillChoices: { count: number; from: string[] };
+  startingEquipmentFixed: EquipmentItem[];
+  startingEquipmentChoices: EquipmentChoice[];
+  startingGoldDice: { dice: number; faces: number; multiplier: number };
 };
 
+const ANY_SKILL = Object.keys(SKILLS);
+const BARBARIAN_SKILLS = ["tratoConAnimales", "atletismo", "intimidacion", "naturaleza", "percepcion", "supervivencia"];
+const CLERIC_SKILLS = ["historia", "perspicacia", "medicina", "persuasion", "religion"];
+const DRUID_SKILLS = ["arcanos", "tratoConAnimales", "perspicacia", "medicina", "naturaleza", "percepcion", "religion", "supervivencia"];
+const FIGHTER_SKILLS = ["acrobacias", "tratoConAnimales", "atletismo", "historia", "perspicacia", "intimidacion", "percepcion", "supervivencia"];
+const MONK_SKILLS = ["acrobacias", "atletismo", "historia", "perspicacia", "religion", "sigilo"];
+const PALADIN_SKILLS = ["atletismo", "perspicacia", "intimidacion", "medicina", "persuasion", "religion"];
+const RANGER_SKILLS = ["tratoConAnimales", "atletismo", "perspicacia", "investigacion", "naturaleza", "percepcion", "sigilo", "supervivencia"];
+const ROGUE_SKILLS = ["acrobacias", "atletismo", "engano", "perspicacia", "intimidacion", "investigacion", "percepcion", "interpretacion", "persuasion", "juegoDeManos", "sigilo"];
+const SORCERER_SKILLS = ["arcanos", "engano", "perspicacia", "intimidacion", "persuasion", "religion"];
+const WARLOCK_SKILLS = ["arcanos", "engano", "historia", "intimidacion", "investigacion", "naturaleza", "religion"];
+const WIZARD_SKILLS = ["arcanos", "historia", "perspicacia", "investigacion", "medicina", "religion"];
+
+const PACK_DUNGEONEER: EquipmentItem[] = [
+  { name: "Mochila de aventurero", qty: 1 },
+  { name: "Palanca", qty: 1 },
+  { name: "Martillo", qty: 1 },
+  { name: "10 clavos de hierro", qty: 1 },
+  { name: "Ración seca", qty: 10 },
+  { name: "Yesca", qty: 1 },
+  { name: "Antorcha", qty: 10 },
+  { name: "Cantimplora", qty: 1 },
+  { name: "15m de cuerda de cáñamo", qty: 1 },
+];
+const PACK_EXPLORER: EquipmentItem[] = [
+  { name: "Mochila de aventurero", qty: 1 },
+  { name: "Saco de dormir", qty: 1 },
+  { name: "Esterilla", qty: 1 },
+  { name: "Yesca", qty: 1 },
+  { name: "Antorcha", qty: 10 },
+  { name: "Ración seca", qty: 10 },
+  { name: "Cantimplora", qty: 1 },
+  { name: "15m de cuerda de cáñamo", qty: 1 },
+];
+const PACK_PRIEST: EquipmentItem[] = [
+  { name: "Mochila", qty: 1 },
+  { name: "Manta", qty: 1 },
+  { name: "Velas", qty: 10 },
+  { name: "Caja de yesca", qty: 1 },
+  { name: "Cepo de donativos", qty: 1 },
+  { name: "2 palos de incienso", qty: 1 },
+  { name: "Incensario", qty: 1 },
+  { name: "Vestiduras", qty: 1 },
+  { name: "Ración seca", qty: 2 },
+  { name: "Cantimplora", qty: 1 },
+];
+const PACK_SCHOLAR: EquipmentItem[] = [
+  { name: "Mochila", qty: 1 },
+  { name: "Libro de saber", qty: 1 },
+  { name: "Botella de tinta", qty: 1 },
+  { name: "Pluma", qty: 1 },
+  { name: "10 hojas de pergamino", qty: 1 },
+  { name: "Pequeña bolsita de arena", qty: 1 },
+  { name: "Cuchillito de cortar", qty: 1 },
+];
+const PACK_BURGLAR: EquipmentItem[] = [
+  { name: "Mochila", qty: 1 },
+  { name: "Canicas", qty: 1000 },
+  { name: "Campana", qty: 1 },
+  { name: "Velas", qty: 5 },
+  { name: "Palanca", qty: 1 },
+  { name: "Martillo", qty: 1 },
+  { name: "Clavos de hierro", qty: 10 },
+  { name: "Linterna ocultable", qty: 1 },
+  { name: "Frasco de aceite", qty: 2 },
+  { name: "Ración seca", qty: 5 },
+  { name: "Caja de yesca", qty: 1 },
+  { name: "Cantimplora", qty: 1 },
+  { name: "15m de cuerda de cáñamo", qty: 1 },
+];
+const PACK_DIPLOMAT: EquipmentItem[] = [
+  { name: "Baúl", qty: 1 },
+  { name: "Cajas de mapas y pergaminos", qty: 2 },
+  { name: "Atuendo fino", qty: 1 },
+  { name: "Botella de tinta", qty: 1 },
+  { name: "Pluma", qty: 1 },
+  { name: "Lámpara", qty: 1 },
+  { name: "Frasco de aceite", qty: 2 },
+  { name: "5 hojas de papel", qty: 1 },
+  { name: "Frasco de perfume", qty: 1 },
+  { name: "Cera para sellar", qty: 1 },
+  { name: "Jabón", qty: 1 },
+];
+const PACK_ENTERTAINER: EquipmentItem[] = [
+  { name: "Mochila", qty: 1 },
+  { name: "Saco de dormir", qty: 1 },
+  { name: "2 disfraces", qty: 1 },
+  { name: "Velas", qty: 5 },
+  { name: "Ración seca", qty: 5 },
+  { name: "Cantimplora", qty: 1 },
+  { name: "Bolsa de baratijas", qty: 1 },
+];
+
 export const CLASSES: ClassBasics[] = [
-  { id: "barbaro", label: "Bárbaro", hitDie: 12, primaryAbility: ["fue"], savingThrows: ["fue", "con"], armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"], weaponProficiencies: ["Armas sencillas", "Armas marciales"] },
-  { id: "bardo", label: "Bardo", hitDie: 8, primaryAbility: ["car"], savingThrows: ["des", "car"], armorProficiencies: ["Armadura ligera"], weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"], spellcasting: { ability: "car", caster: "full" } },
-  { id: "clerigo", label: "Clérigo", hitDie: 8, primaryAbility: ["sab"], savingThrows: ["sab", "car"], armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"], weaponProficiencies: ["Armas sencillas"], spellcasting: { ability: "sab", caster: "full" } },
-  { id: "druida", label: "Druida", hitDie: 8, primaryAbility: ["sab"], savingThrows: ["int", "sab"], armorProficiencies: ["Armadura ligera (no metálica)", "Armadura media (no metálica)", "Escudos (no metálicos)"], weaponProficiencies: ["Garrotes", "Dagas", "Dardos", "Jabalinas", "Mazas", "Bastones", "Cimitarras", "Hoces", "Hondas", "Lanzas"], spellcasting: { ability: "sab", caster: "full" } },
-  { id: "guerrero", label: "Guerrero", hitDie: 10, primaryAbility: ["fue", "des"], savingThrows: ["fue", "con"], armorProficiencies: ["Todas las armaduras", "Escudos"], weaponProficiencies: ["Armas sencillas", "Armas marciales"] },
-  { id: "monje", label: "Monje", hitDie: 8, primaryAbility: ["des", "sab"], savingThrows: ["fue", "des"], armorProficiencies: [], weaponProficiencies: ["Armas sencillas", "Espadas cortas"] },
-  { id: "paladin", label: "Paladín", hitDie: 10, primaryAbility: ["fue", "car"], savingThrows: ["sab", "car"], armorProficiencies: ["Todas las armaduras", "Escudos"], weaponProficiencies: ["Armas sencillas", "Armas marciales"], spellcasting: { ability: "car", caster: "half" } },
-  { id: "explorador", label: "Explorador", hitDie: 10, primaryAbility: ["des", "sab"], savingThrows: ["fue", "des"], armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"], weaponProficiencies: ["Armas sencillas", "Armas marciales"], spellcasting: { ability: "sab", caster: "half" } },
-  { id: "picaro", label: "Pícaro", hitDie: 8, primaryAbility: ["des"], savingThrows: ["des", "int"], armorProficiencies: ["Armadura ligera"], weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"] },
-  { id: "hechicero", label: "Hechicero", hitDie: 6, primaryAbility: ["car"], savingThrows: ["con", "car"], armorProficiencies: [], weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"], spellcasting: { ability: "car", caster: "full" } },
-  { id: "brujo", label: "Brujo", hitDie: 8, primaryAbility: ["car"], savingThrows: ["sab", "car"], armorProficiencies: ["Armadura ligera"], weaponProficiencies: ["Armas sencillas"], spellcasting: { ability: "car", caster: "pact" } },
-  { id: "mago", label: "Mago", hitDie: 6, primaryAbility: ["int"], savingThrows: ["int", "sab"], armorProficiencies: [], weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"], spellcasting: { ability: "int", caster: "full" } },
+  {
+    id: "barbaro",
+    label: "Bárbaro",
+    hitDie: 12,
+    primaryAbility: ["fue"],
+    savingThrows: ["fue", "con"],
+    armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
+    weaponProficiencies: ["Armas sencillas", "Armas marciales"],
+    skillChoices: { count: 2, from: BARBARIAN_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Jabalina", qty: 4 },
+      { name: "Paquete de aventurero", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "arma-principal",
+        label: "Arma principal",
+        options: [
+          { id: "gran-hacha", label: "(a) Gran hacha", items: [{ name: "Gran hacha", qty: 1 }] },
+          { id: "marcial-cuerpo", label: "(b) Arma marcial cuerpo a cuerpo a elección", items: [{ name: "Arma marcial cuerpo a cuerpo", qty: 1, note: "Elige cualquiera con la que tengas competencia" }] },
+        ],
+      },
+      {
+        id: "arma-secundaria",
+        label: "Arma secundaria",
+        options: [
+          { id: "dos-hachas", label: "(a) Dos hachas de mano", items: [{ name: "Hacha de mano", qty: 2 }] },
+          { id: "arma-sencilla", label: "(b) Un arma sencilla a elección", items: [{ name: "Arma sencilla", qty: 1, note: "Elige cualquier arma sencilla" }] },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 2, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "bardo",
+    label: "Bardo",
+    hitDie: 8,
+    primaryAbility: ["car"],
+    savingThrows: ["des", "car"],
+    armorProficiencies: ["Armadura ligera"],
+    weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"],
+    toolProficiencies: ["Tres instrumentos musicales a elección"],
+    spellcasting: { ability: "car", caster: "full" },
+    skillChoices: { count: 3, from: ANY_SKILL },
+    startingEquipmentFixed: [
+      { name: "Armadura de cuero", qty: 1 },
+      { name: "Daga", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma de bardo",
+        options: [
+          { id: "estoque", label: "(a) Estoque", items: [{ name: "Estoque", qty: 1 }] },
+          { id: "espada-larga", label: "(b) Espada larga", items: [{ name: "Espada larga", qty: 1 }] },
+          { id: "arma-sencilla", label: "(c) Un arma sencilla a elección", items: [{ name: "Arma sencilla", qty: 1, note: "Elige cualquier arma sencilla" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete de exploración",
+        options: [
+          { id: "diplomat", label: "(a) Paquete de diplomático", items: PACK_DIPLOMAT },
+          { id: "entertainer", label: "(b) Paquete de animador", items: PACK_ENTERTAINER },
+        ],
+      },
+      {
+        id: "instrumento",
+        label: "Instrumento musical",
+        options: [
+          { id: "laud", label: "(a) Laúd", items: [{ name: "Laúd", qty: 1 }] },
+          { id: "otro", label: "(b) Otro instrumento musical a elección", items: [{ name: "Instrumento musical", qty: 1, note: "Elige cualquiera" }] },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "clerigo",
+    label: "Clérigo",
+    hitDie: 8,
+    primaryAbility: ["sab"],
+    savingThrows: ["sab", "car"],
+    armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
+    weaponProficiencies: ["Armas sencillas"],
+    spellcasting: { ability: "sab", caster: "full" },
+    skillChoices: { count: 2, from: CLERIC_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Escudo", qty: 1 },
+      { name: "Símbolo sagrado", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma principal",
+        options: [
+          { id: "maza", label: "(a) Maza", items: [{ name: "Maza", qty: 1 }] },
+          { id: "martillo", label: "(b) Martillo de guerra (si tienes competencia)", items: [{ name: "Martillo de guerra", qty: 1 }] },
+        ],
+      },
+      {
+        id: "armadura",
+        label: "Armadura",
+        options: [
+          { id: "escamas", label: "(a) Armadura de escamas", items: [{ name: "Armadura de escamas", qty: 1 }] },
+          { id: "cuero", label: "(b) Armadura de cuero", items: [{ name: "Armadura de cuero", qty: 1 }] },
+          { id: "cota-malla", label: "(c) Cota de malla (si tienes competencia)", items: [{ name: "Cota de malla", qty: 1 }] },
+        ],
+      },
+      {
+        id: "distancia",
+        label: "Arma a distancia",
+        options: [
+          { id: "ballesta-ligera", label: "(a) Ballesta ligera + 20 virotes", items: [{ name: "Ballesta ligera", qty: 1 }, { name: "Virote", qty: 20 }] },
+          { id: "sencilla", label: "(b) Cualquier arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "Elige cualquiera" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "priest", label: "(a) Paquete de sacerdote", items: PACK_PRIEST },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "druida",
+    label: "Druida",
+    hitDie: 8,
+    primaryAbility: ["sab"],
+    savingThrows: ["int", "sab"],
+    armorProficiencies: ["Armadura ligera (no metálica)", "Armadura media (no metálica)", "Escudos (no metálicos)"],
+    weaponProficiencies: ["Garrotes", "Dagas", "Dardos", "Jabalinas", "Mazas", "Bastones", "Cimitarras", "Hoces", "Hondas", "Lanzas"],
+    spellcasting: { ability: "sab", caster: "full" },
+    skillChoices: { count: 2, from: DRUID_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Armadura de cuero", qty: 1 },
+      { name: "Paquete de explorador", qty: 1 },
+      { name: "Foco drúdico", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "escudo",
+        label: "Escudo o arma",
+        options: [
+          { id: "escudo", label: "(a) Escudo de madera", items: [{ name: "Escudo de madera", qty: 1 }] },
+          { id: "arma-sencilla", label: "(b) Arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "Elige cualquiera" }] },
+        ],
+      },
+      {
+        id: "arma-principal",
+        label: "Arma principal",
+        options: [
+          { id: "cimitarra", label: "(a) Cimitarra", items: [{ name: "Cimitarra", qty: 1 }] },
+          { id: "arma-cuerpo", label: "(b) Cualquier arma sencilla cuerpo a cuerpo", items: [{ name: "Arma sencilla cuerpo a cuerpo", qty: 1, note: "Elige cualquiera" }] },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 2, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "guerrero",
+    label: "Guerrero",
+    hitDie: 10,
+    primaryAbility: ["fue", "des"],
+    savingThrows: ["fue", "con"],
+    armorProficiencies: ["Todas las armaduras", "Escudos"],
+    weaponProficiencies: ["Armas sencillas", "Armas marciales"],
+    skillChoices: { count: 2, from: FIGHTER_SKILLS },
+    startingEquipmentFixed: [],
+    startingEquipmentChoices: [
+      {
+        id: "armadura",
+        label: "Armadura",
+        options: [
+          { id: "cota-malla", label: "(a) Cota de malla", items: [{ name: "Cota de malla", qty: 1 }] },
+          { id: "cuero-arco", label: "(b) Armadura de cuero, arco largo y 20 flechas", items: [{ name: "Armadura de cuero", qty: 1 }, { name: "Arco largo", qty: 1 }, { name: "Flecha", qty: 20 }] },
+        ],
+      },
+      {
+        id: "arma-principal",
+        label: "Arma principal",
+        options: [
+          { id: "marcial-escudo", label: "(a) Arma marcial y escudo", items: [{ name: "Arma marcial", qty: 1, note: "A elección" }, { name: "Escudo", qty: 1 }] },
+          { id: "dos-marciales", label: "(b) Dos armas marciales", items: [{ name: "Arma marcial", qty: 2, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "arma-distancia",
+        label: "Arma a distancia",
+        options: [
+          { id: "ballesta", label: "(a) Ballesta ligera + 20 virotes", items: [{ name: "Ballesta ligera", qty: 1 }, { name: "Virote", qty: 20 }] },
+          { id: "hachas", label: "(b) Dos hachas de mano", items: [{ name: "Hacha de mano", qty: 2 }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "dungeoneer", label: "(a) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "monje",
+    label: "Monje",
+    hitDie: 8,
+    primaryAbility: ["des", "sab"],
+    savingThrows: ["fue", "des"],
+    armorProficiencies: [],
+    weaponProficiencies: ["Armas sencillas", "Espadas cortas"],
+    skillChoices: { count: 2, from: MONK_SKILLS },
+    startingEquipmentFixed: [{ name: "Dardo", qty: 10 }],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma",
+        options: [
+          { id: "espada-corta", label: "(a) Espada corta", items: [{ name: "Espada corta", qty: 1 }] },
+          { id: "sencilla", label: "(b) Cualquier arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "Elige cualquiera" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "dungeoneer", label: "(a) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 1 },
+  },
+  {
+    id: "paladin",
+    label: "Paladín",
+    hitDie: 10,
+    primaryAbility: ["fue", "car"],
+    savingThrows: ["sab", "car"],
+    armorProficiencies: ["Todas las armaduras", "Escudos"],
+    weaponProficiencies: ["Armas sencillas", "Armas marciales"],
+    spellcasting: { ability: "car", caster: "half" },
+    skillChoices: { count: 2, from: PALADIN_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Cota de malla", qty: 1 },
+      { name: "Símbolo sagrado", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "arma-principal",
+        label: "Arma principal",
+        options: [
+          { id: "marcial-escudo", label: "(a) Arma marcial y escudo", items: [{ name: "Arma marcial", qty: 1, note: "A elección" }, { name: "Escudo", qty: 1 }] },
+          { id: "dos-marciales", label: "(b) Dos armas marciales", items: [{ name: "Arma marcial", qty: 2, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "secundaria",
+        label: "Arma secundaria",
+        options: [
+          { id: "jabalinas", label: "(a) Cinco jabalinas", items: [{ name: "Jabalina", qty: 5 }] },
+          { id: "cuerpo", label: "(b) Arma sencilla cuerpo a cuerpo", items: [{ name: "Arma sencilla cuerpo a cuerpo", qty: 1, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "priest", label: "(a) Paquete de sacerdote", items: PACK_PRIEST },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "explorador",
+    label: "Explorador",
+    hitDie: 10,
+    primaryAbility: ["des", "sab"],
+    savingThrows: ["fue", "des"],
+    armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
+    weaponProficiencies: ["Armas sencillas", "Armas marciales"],
+    spellcasting: { ability: "sab", caster: "half" },
+    skillChoices: { count: 3, from: RANGER_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Arco largo", qty: 1 },
+      { name: "Flecha", qty: 20 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "armadura",
+        label: "Armadura",
+        options: [
+          { id: "escamas", label: "(a) Armadura de escamas", items: [{ name: "Armadura de escamas", qty: 1 }] },
+          { id: "cuero", label: "(b) Armadura de cuero", items: [{ name: "Armadura de cuero", qty: 1 }] },
+        ],
+      },
+      {
+        id: "armas",
+        label: "Armas cuerpo a cuerpo",
+        options: [
+          { id: "dos-espadas", label: "(a) Dos espadas cortas", items: [{ name: "Espada corta", qty: 2 }] },
+          { id: "dos-sencillas", label: "(b) Dos armas sencillas cuerpo a cuerpo", items: [{ name: "Arma sencilla cuerpo a cuerpo", qty: 2, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "dungeoneer", label: "(a) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 5, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "picaro",
+    label: "Pícaro",
+    hitDie: 8,
+    primaryAbility: ["des"],
+    savingThrows: ["des", "int"],
+    armorProficiencies: ["Armadura ligera"],
+    weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"],
+    toolProficiencies: ["Herramientas de ladrón"],
+    skillChoices: { count: 4, from: ROGUE_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Armadura de cuero", qty: 1 },
+      { name: "Daga", qty: 2 },
+      { name: "Herramientas de ladrón", qty: 1 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "principal",
+        label: "Arma principal",
+        options: [
+          { id: "estoque", label: "(a) Estoque", items: [{ name: "Estoque", qty: 1 }] },
+          { id: "espada-corta", label: "(b) Espada corta", items: [{ name: "Espada corta", qty: 1 }] },
+        ],
+      },
+      {
+        id: "secundaria",
+        label: "Arma secundaria",
+        options: [
+          { id: "arco-corto", label: "(a) Arco corto + 20 flechas + carcaj", items: [{ name: "Arco corto", qty: 1 }, { name: "Flecha", qty: 20 }, { name: "Carcaj", qty: 1 }] },
+          { id: "espada-corta", label: "(b) Espada corta", items: [{ name: "Espada corta", qty: 1 }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "burglar", label: "(a) Paquete de ladrón", items: PACK_BURGLAR },
+          { id: "dungeoneer", label: "(b) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+          { id: "explorer", label: "(c) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 4, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "hechicero",
+    label: "Hechicero",
+    hitDie: 6,
+    primaryAbility: ["car"],
+    savingThrows: ["con", "car"],
+    armorProficiencies: [],
+    weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"],
+    spellcasting: { ability: "car", caster: "full" },
+    skillChoices: { count: 2, from: SORCERER_SKILLS },
+    startingEquipmentFixed: [{ name: "Daga", qty: 2 }],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma",
+        options: [
+          { id: "ballesta", label: "(a) Ballesta ligera + 20 virotes", items: [{ name: "Ballesta ligera", qty: 1 }, { name: "Virote", qty: 20 }] },
+          { id: "sencilla", label: "(b) Cualquier arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "foco",
+        label: "Foco arcano",
+        options: [
+          { id: "componentes", label: "(a) Bolsa de componentes", items: [{ name: "Bolsa de componentes", qty: 1 }] },
+          { id: "foco", label: "(b) Foco arcano", items: [{ name: "Foco arcano", qty: 1 }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "dungeoneer", label: "(a) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 3, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "brujo",
+    label: "Brujo",
+    hitDie: 8,
+    primaryAbility: ["car"],
+    savingThrows: ["sab", "car"],
+    armorProficiencies: ["Armadura ligera"],
+    weaponProficiencies: ["Armas sencillas"],
+    spellcasting: { ability: "car", caster: "pact" },
+    skillChoices: { count: 2, from: WARLOCK_SKILLS },
+    startingEquipmentFixed: [
+      { name: "Armadura de cuero", qty: 1 },
+      { name: "Daga", qty: 2 },
+    ],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma",
+        options: [
+          { id: "ballesta", label: "(a) Ballesta ligera + 20 virotes", items: [{ name: "Ballesta ligera", qty: 1 }, { name: "Virote", qty: 20 }] },
+          { id: "sencilla", label: "(b) Cualquier arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "foco",
+        label: "Foco arcano",
+        options: [
+          { id: "componentes", label: "(a) Bolsa de componentes", items: [{ name: "Bolsa de componentes", qty: 1 }] },
+          { id: "foco", label: "(b) Foco arcano", items: [{ name: "Foco arcano", qty: 1 }] },
+        ],
+      },
+      {
+        id: "arma-extra",
+        label: "Arma cuerpo a cuerpo",
+        options: [
+          { id: "sencilla2", label: "Arma sencilla", items: [{ name: "Arma sencilla", qty: 1, note: "A elección" }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "scholar", label: "(a) Paquete de erudito", items: PACK_SCHOLAR },
+          { id: "dungeoneer", label: "(b) Paquete de explorador de mazmorras", items: PACK_DUNGEONEER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 4, faces: 4, multiplier: 10 },
+  },
+  {
+    id: "mago",
+    label: "Mago",
+    hitDie: 6,
+    primaryAbility: ["int"],
+    savingThrows: ["int", "sab"],
+    armorProficiencies: [],
+    weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"],
+    spellcasting: { ability: "int", caster: "full" },
+    skillChoices: { count: 2, from: WIZARD_SKILLS },
+    startingEquipmentFixed: [{ name: "Libro de conjuros", qty: 1 }],
+    startingEquipmentChoices: [
+      {
+        id: "arma",
+        label: "Arma",
+        options: [
+          { id: "baston", label: "(a) Bastón", items: [{ name: "Bastón", qty: 1 }] },
+          { id: "daga", label: "(b) Daga", items: [{ name: "Daga", qty: 1 }] },
+        ],
+      },
+      {
+        id: "foco",
+        label: "Foco arcano",
+        options: [
+          { id: "componentes", label: "(a) Bolsa de componentes", items: [{ name: "Bolsa de componentes", qty: 1 }] },
+          { id: "foco", label: "(b) Foco arcano", items: [{ name: "Foco arcano", qty: 1 }] },
+        ],
+      },
+      {
+        id: "paquete",
+        label: "Paquete",
+        options: [
+          { id: "scholar", label: "(a) Paquete de erudito", items: PACK_SCHOLAR },
+          { id: "explorer", label: "(b) Paquete de explorador", items: PACK_EXPLORER },
+        ],
+      },
+    ],
+    startingGoldDice: { dice: 4, faces: 4, multiplier: 10 },
+  },
 ];
 
 export type RaceBasics = {
@@ -193,19 +780,20 @@ export type BackgroundBasics = {
   languages: number;
   tools: string[];
   equipment: string[];
+  startingMoney: { gp: number };
   feature: { name: string; text: string };
 };
 
 export const BACKGROUNDS: BackgroundBasics[] = [
-  { id: "acolito", label: "Acólito", skillProficiencies: ["perspicacia", "religion"], languages: 2, tools: [], equipment: ["Símbolo sagrado", "Libro de oraciones", "5 varillas de incienso", "Vestiduras", "Atuendo común", "15 po"], feature: { name: "Refugio de los fieles", text: "Recibes cuidado y hospitalidad en templos y santuarios de tu fe." } },
-  { id: "artesano", label: "Artesano de gremio", skillProficiencies: ["perspicacia", "persuasion"], languages: 1, tools: ["Herramientas de un artesano"], equipment: ["Herramientas de artesano", "Carta de presentación del gremio", "Atuendo de viajero", "15 po"], feature: { name: "Miembro del gremio", text: "Puedes contar con la ayuda del gremio donde vayas." } },
-  { id: "criminal", label: "Criminal", skillProficiencies: ["engano", "sigilo"], languages: 0, tools: ["Juego de herramientas de ladrón", "Un juego de juegos"], equipment: ["Palanca", "Atuendo oscuro común con capucha", "Bolsa con 15 po"], feature: { name: "Contacto criminal", text: "Tienes un contacto confiable en el bajo mundo." } },
-  { id: "forastero", label: "Forastero", skillProficiencies: ["atletismo", "supervivencia"], languages: 1, tools: ["Un instrumento musical"], equipment: ["Bastón", "Trampa de caza", "Trofeo de un animal", "Atuendo de viajero", "10 po"], feature: { name: "Errante", text: "Recuerdas la geografía del terreno salvaje y puedes encontrar comida y agua para ti y cinco personas más." } },
-  { id: "heroePueblo", label: "Héroe del pueblo", skillProficiencies: ["tratoConAnimales", "supervivencia"], languages: 0, tools: ["Un juego de herramientas de artesano", "Vehículos de tierra"], equipment: ["Herramientas de artesano", "Pala", "Olla de hierro", "Atuendo común", "10 po"], feature: { name: "Hospitalidad rústica", text: "La gente del pueblo y campesinos te abren sus puertas." } },
-  { id: "marinero", label: "Marinero", skillProficiencies: ["atletismo", "percepcion"], languages: 0, tools: ["Vehículos acuáticos", "Herramientas de navegante"], equipment: ["Clavija de atraque", "18 m de cuerda de seda", "Amuleto de la suerte", "Atuendo común", "10 po"], feature: { name: "Pasaje gratis", text: "Puedes conseguir pasaje gratuito en un barco mercante para ti y tus compañeros." } },
-  { id: "noble", label: "Noble", skillProficiencies: ["historia", "persuasion"], languages: 1, tools: ["Un juego de juegos"], equipment: ["Atuendo fino", "Anillo con sello", "Pergamino de linaje", "25 po"], feature: { name: "Posición privilegiada", text: "La gente común te trata con deferencia dada tu posición." } },
-  { id: "sabio", label: "Sabio", skillProficiencies: ["arcanos", "historia"], languages: 2, tools: [], equipment: ["Botella de tinta", "Pluma", "Cuchillo pequeño", "Carta de un colega con una pregunta sin responder", "Atuendo común", "10 po"], feature: { name: "Investigador", text: "Cuando intentas aprender o recordar algo, sabes dónde y de quién obtener la información." } },
-  { id: "soldado", label: "Soldado", skillProficiencies: ["atletismo", "intimidacion"], languages: 0, tools: ["Un juego de juegos", "Vehículos de tierra"], equipment: ["Insignia de rango", "Trofeo de batalla", "Juego de dados o baraja", "Atuendo común", "10 po"], feature: { name: "Rango militar", text: "Soldados leales te reconocen y te ofrecen apoyo." } },
+  { id: "acolito", label: "Acólito", skillProficiencies: ["perspicacia", "religion"], languages: 2, tools: [], equipment: ["Símbolo sagrado", "Libro de oraciones", "5 varillas de incienso", "Vestiduras", "Atuendo común"], startingMoney: { gp: 15 }, feature: { name: "Refugio de los fieles", text: "Recibes cuidado y hospitalidad en templos y santuarios de tu fe." } },
+  { id: "artesano", label: "Artesano de gremio", skillProficiencies: ["perspicacia", "persuasion"], languages: 1, tools: ["Herramientas de un artesano"], equipment: ["Herramientas de artesano", "Carta de presentación del gremio", "Atuendo de viajero"], startingMoney: { gp: 15 }, feature: { name: "Miembro del gremio", text: "Puedes contar con la ayuda del gremio donde vayas." } },
+  { id: "criminal", label: "Criminal", skillProficiencies: ["engano", "sigilo"], languages: 0, tools: ["Juego de herramientas de ladrón", "Un juego de juegos"], equipment: ["Palanca", "Atuendo oscuro común con capucha"], startingMoney: { gp: 15 }, feature: { name: "Contacto criminal", text: "Tienes un contacto confiable en el bajo mundo." } },
+  { id: "forastero", label: "Forastero", skillProficiencies: ["atletismo", "supervivencia"], languages: 1, tools: ["Un instrumento musical"], equipment: ["Bastón", "Trampa de caza", "Trofeo de un animal", "Atuendo de viajero"], startingMoney: { gp: 10 }, feature: { name: "Errante", text: "Recuerdas la geografía del terreno salvaje y puedes encontrar comida y agua para ti y cinco personas más." } },
+  { id: "heroePueblo", label: "Héroe del pueblo", skillProficiencies: ["tratoConAnimales", "supervivencia"], languages: 0, tools: ["Un juego de herramientas de artesano", "Vehículos de tierra"], equipment: ["Herramientas de artesano", "Pala", "Olla de hierro", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Hospitalidad rústica", text: "La gente del pueblo y campesinos te abren sus puertas." } },
+  { id: "marinero", label: "Marinero", skillProficiencies: ["atletismo", "percepcion"], languages: 0, tools: ["Vehículos acuáticos", "Herramientas de navegante"], equipment: ["Clavija de atraque", "18 m de cuerda de seda", "Amuleto de la suerte", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Pasaje gratis", text: "Puedes conseguir pasaje gratuito en un barco mercante para ti y tus compañeros." } },
+  { id: "noble", label: "Noble", skillProficiencies: ["historia", "persuasion"], languages: 1, tools: ["Un juego de juegos"], equipment: ["Atuendo fino", "Anillo con sello", "Pergamino de linaje"], startingMoney: { gp: 25 }, feature: { name: "Posición privilegiada", text: "La gente común te trata con deferencia dada tu posición." } },
+  { id: "sabio", label: "Sabio", skillProficiencies: ["arcanos", "historia"], languages: 2, tools: [], equipment: ["Botella de tinta", "Pluma", "Cuchillo pequeño", "Carta de un colega con una pregunta sin responder", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Investigador", text: "Cuando intentas aprender o recordar algo, sabes dónde y de quién obtener la información." } },
+  { id: "soldado", label: "Soldado", skillProficiencies: ["atletismo", "intimidacion"], languages: 0, tools: ["Un juego de juegos", "Vehículos de tierra"], equipment: ["Insignia de rango", "Trofeo de batalla", "Juego de dados o baraja", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Rango militar", text: "Soldados leales te reconocen y te ofrecen apoyo." } },
 ];
 
 export function maxHpAtLevel1(hitDie: number, conMod: number): number {
