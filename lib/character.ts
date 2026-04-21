@@ -72,6 +72,8 @@ export const CharacterSchema = z.object({
     hitDie: z.number().int(),
   }),
   ac: z.number().int(),
+  /** PHB: anillo de protección, armadura/escudo mágico (+X), etc. Se suma al resultado de `computeAc`. */
+  acOtherBonus: z.number().int().default(0),
   speed: z.number().int().default(30),
   initiativeBonus: z.number().int().default(0),
   proficiencies: z
@@ -95,6 +97,10 @@ export const CharacterSchema = z.object({
     .default({ known: [], slots: {} }),
   features: z.array(z.object({ name: z.string(), source: z.string(), text: z.string() })).default([]),
   feats: z.array(z.string()).default([]),
+  // Estilos de combate (guerrero lvl 1, paladín/explorador lvl 2). Se guardan como
+  // ids de FIGHTING_STYLES para que computeAc pueda aplicar "defensa" y futuras mejoras
+  // puedan inspeccionarlos (dueling, archery, etc.) sin tocar la ficha.
+  fightingStyles: z.array(z.string()).default([]),
   portrait: z.string().optional(),
   notes: z.string().optional(),
   personality: z
@@ -198,13 +204,55 @@ export function findArmor(name: string): ArmorEntry | undefined {
   return ARMORS.find((a) => a.name.toLowerCase() === n);
 }
 
+// PHB p. 72 (Fighter), p. 84 (Paladín), p. 91 (Explorador). Los estilos de combate
+// son rasgos de clase a nivel 1 (guerrero) o nivel 2 (paladín, explorador). IDs en
+// español sin acento para seguir la convención del resto del proyecto.
+export type FightingStyleId =
+  | "arqueria"
+  | "defensa"
+  | "duelo"
+  | "armas-grandes"
+  | "proteccion"
+  | "dos-armas";
+
+export type FightingStyle = {
+  id: FightingStyleId;
+  label: string;
+  summary: string;
+  classes: string[]; // clases que pueden seleccionarlo
+};
+
+export const FIGHTING_STYLES: FightingStyle[] = [
+  { id: "arqueria", label: "Arquería", summary: "+2 a las tiradas de ataque con armas a distancia.", classes: ["guerrero", "explorador"] },
+  { id: "defensa", label: "Defensa", summary: "+1 a la CA mientras lleves armadura.", classes: ["guerrero", "paladin", "explorador"] },
+  { id: "duelo", label: "Duelo", summary: "+2 al daño con un arma cuerpo a cuerpo a una mano cuando no llevas otra.", classes: ["guerrero", "paladin", "explorador"] },
+  { id: "armas-grandes", label: "Armas grandes", summary: "Repite 1 y 2 en los dados de daño de armas cuerpo a cuerpo a dos manos o versátiles (una vez por tirada).", classes: ["guerrero", "paladin"] },
+  { id: "proteccion", label: "Protección", summary: "Usa tu reacción para imponer desventaja al ataque contra un aliado a 1,5m si portas escudo.", classes: ["guerrero", "paladin"] },
+  { id: "dos-armas", label: "Dos armas", summary: "Añade tu modificador de atributo al daño del segundo ataque cuando luchas con dos armas.", classes: ["guerrero", "explorador"] },
+];
+
+export function fightingStylesForClass(classId: string): FightingStyle[] {
+  return FIGHTING_STYLES.filter((s) => s.classes.includes(classId));
+}
+
+// Clase/nivel → cuántos estilos elige en creación. PHB p. 72/84/91.
+export function fightingStyleSlots(classId: string, level: number): number {
+  if (classId === "guerrero" && level >= 1) return 1;
+  if (classId === "paladin" && level >= 2) return 1;
+  if (classId === "explorador" && level >= 2) return 1;
+  return 0;
+}
+
 export function computeAc(params: {
   equipment: EquipmentItem[];
   abilityScores: Record<Ability, number>;
   racialBonus?: Partial<Record<Ability, number>>;
   klassId?: string;
+  fightingStyles?: FightingStyleId[];
+  /** Bonos de CA por objetos mágicos u otras fuentes que no modifiquen la tabla de armadura (PHB cap. 9). */
+  otherAcBonus?: number;
 }): number {
-  const { equipment, abilityScores, racialBonus = {}, klassId } = params;
+  const { equipment, abilityScores, racialBonus = {}, klassId, fightingStyles = [], otherAcBonus = 0 } = params;
   const score = (a: Ability) => (abilityScores[a] ?? 10) + (racialBonus[a] ?? 0);
   const dexMod = abilityMod(score("des"));
   const conMod = abilityMod(score("con"));
@@ -223,14 +271,17 @@ export function computeAc(params: {
   }
 
   const shieldBonus = hasShield ? 2 : 0;
+  // PHB p. 72 ("Defense"): +1 a la CA mientras lleves armadura. No aplica sin armadura
+  // (incluyendo las defensas sin armadura de bárbaro/monje).
+  const defenseBonus = body && fightingStyles.includes("defensa") ? 1 : 0;
   if (body) {
     const dexContribution = body.maxDex !== undefined ? Math.min(dexMod, body.maxDex) : dexMod;
-    return body.baseAc + dexContribution + shieldBonus;
+    return body.baseAc + dexContribution + shieldBonus + defenseBonus + otherAcBonus;
   }
   // Sin armadura: considerar Unarmored Defense del bárbaro (PHB p.48) y monje (PHB p.79).
-  if (klassId === "barbaro") return 10 + dexMod + conMod + shieldBonus;
-  if (klassId === "monje" && !hasShield) return 10 + dexMod + wisMod;
-  return 10 + dexMod + shieldBonus;
+  if (klassId === "barbaro") return 10 + dexMod + conMod + shieldBonus + otherAcBonus;
+  if (klassId === "monje" && !hasShield) return 10 + dexMod + wisMod + otherAcBonus;
+  return 10 + dexMod + shieldBonus + otherAcBonus;
 }
 
 export type ClassBasics = {
@@ -242,6 +293,8 @@ export type ClassBasics = {
   armorProficiencies: string[];
   weaponProficiencies: string[];
   toolProficiencies?: string[];
+  /** PHB: elecciones concretas (bardo: 3 instrumentos; monje: 1 herramienta de artesano o instrumento). */
+  toolPicks?: { count: number; pool: "instruments" | "artisan-or-instrument" };
   spellcasting?: {
     ability: Ability;
     caster: "full" | "half" | "third" | "pact";
@@ -397,7 +450,8 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["des", "car"],
     armorProficiencies: ["Armadura ligera"],
     weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"],
-    toolProficiencies: ["Tres instrumentos musicales a elección"],
+    toolProficiencies: [],
+    toolPicks: { count: 3, pool: "instruments" },
     spellcasting: { ability: "car", caster: "full", cantripsKnown: 2, spellsKnown: 4, preparation: "known" },
     skillChoices: { count: 3, from: ANY_SKILL },
     startingEquipmentFixed: [
@@ -574,7 +628,8 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["fue", "des"],
     armorProficiencies: [],
     weaponProficiencies: ["Armas sencillas", "Espadas cortas"],
-    toolProficiencies: ["Un tipo de herramientas de artesano o un instrumento musical a elección"],
+    toolProficiencies: [],
+    toolPicks: { count: 1, pool: "artisan-or-instrument" },
     skillChoices: { count: 2, from: MONK_SKILLS },
     startingEquipmentFixed: [{ name: "Dardo", qty: 10 }],
     startingEquipmentChoices: [
@@ -1188,15 +1243,42 @@ const RANGER_SPELLS_KNOWN: Record<number, number> = {
   11: 7, 12: 7, 13: 8, 14: 8, 15: 9, 16: 9, 17: 10, 18: 10, 19: 11, 20: 11,
 };
 
-// Número de conjuros de nivel 1+ que el personaje elige al crear ficha.
-// - "known"    → `spellcasting.spellsKnown` para lanzadores completos (bardo, hechicero, brujo).
-//                Para medio-lanzadores "conocidos" (explorador, PHB p. 91) usamos la tabla de la clase.
-// - "prepared" → `level + mod(ability)` con mínimo 1 para lanzadores completos (clérigo, druida).
-//                Para medio-lanzadores "preparados" (paladín, PHB p. 85) la fórmula es
-//                `floor(level/2) + mod CAR` mínimo 1, y no hay conjuros antes del nivel 2.
-// - "spellbook"→ `spellcasting.spellbookCount` (mago copia 6 conjuros en su grimorio al nivel 1).
-export function firstLevelSpellPicks(
+// PHB — conjuros conocidos por nivel de personaje (tablas “Spells Known”).
+const SPELLS_KNOWN_BARD: Record<number, number> = {
+  1: 4, 2: 5, 3: 6, 4: 7, 5: 8, 6: 9, 7: 10, 8: 11, 9: 12, 10: 14, 11: 15, 12: 15, 13: 16, 14: 16,
+  15: 17, 16: 17, 17: 18, 18: 18, 19: 19, 20: 22,
+};
+const SPELLS_KNOWN_SORCERER: Record<number, number> = {
+  1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10, 10: 11, 11: 12, 12: 12, 13: 13, 14: 13,
+  15: 14, 16: 14, 17: 15, 18: 15, 19: 15, 20: 15,
+};
+const SPELLS_KNOWN_WARLOCK: Record<number, number> = {
+  1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10, 10: 10, 11: 11, 12: 11, 13: 12, 14: 12,
+  15: 13, 16: 13, 17: 14, 18: 14, 19: 15, 20: 15,
+};
+
+/** Mayor nivel de ranura de conjuro que el personaje puede usar (coincide con la longitud de `spellSlotsFor`). */
+export function maxCastableSpellLevel(
+  caster: NonNullable<ClassBasics["spellcasting"]>["caster"],
+  characterLevel: number,
+): number {
+  return spellSlotsFor(caster, characterLevel).length;
+}
+
+/** PHB mago: 6 en grimorio al nivel 1 + 2 por cada nivel posterior. */
+export function wizardSpellbookSize(characterLevel: number): number {
+  if (characterLevel < 1) return 0;
+  return 6 + 2 * (characterLevel - 1);
+}
+
+/**
+ * Cuántos conjuros de nivel ≥1 debe elegir el jugador en el paso Conjuros (sin trucos).
+ * `classId` desempata bardo / hechicero / brujo en la tabla de “conjuros conocidos”.
+ * Alias histórico: `firstLevelSpellPicks`.
+ */
+export function nonCantripSpellPicks(
   spellcasting: NonNullable<ClassBasics["spellcasting"]>,
+  classId: string,
   level: number,
   abilityScore: number,
 ): number {
@@ -1206,9 +1288,16 @@ export function firstLevelSpellPicks(
         if (level < 2) return 0;
         return RANGER_SPELLS_KNOWN[Math.min(20, level)] ?? 0;
       }
+      if (spellcasting.caster === "full") {
+        const lvl = Math.min(20, Math.max(1, level));
+        if (classId === "bardo") return SPELLS_KNOWN_BARD[lvl] ?? spellcasting.spellsKnown ?? 0;
+        if (classId === "hechicero") return SPELLS_KNOWN_SORCERER[lvl] ?? spellcasting.spellsKnown ?? 0;
+        if (classId === "brujo") return SPELLS_KNOWN_WARLOCK[lvl] ?? spellcasting.spellsKnown ?? 0;
+        return spellcasting.spellsKnown ?? 0;
+      }
       return spellcasting.spellsKnown ?? 0;
     case "spellbook":
-      return spellcasting.spellbookCount ?? 0;
+      return wizardSpellbookSize(level);
     case "prepared":
       if (spellcasting.caster === "half") {
         if (level < 2) return 0;
@@ -1218,6 +1307,16 @@ export function firstLevelSpellPicks(
     default:
       return 0;
   }
+}
+
+/** Alias de `nonCantripSpellPicks` (nombre histórico del paso “conjuros nivel 1”). */
+export function firstLevelSpellPicks(
+  spellcasting: NonNullable<ClassBasics["spellcasting"]>,
+  level: number,
+  abilityScore: number,
+  classId: string,
+): number {
+  return nonCantripSpellPicks(spellcasting, classId, level, abilityScore);
 }
 
 // Número de conjuros que el mago puede preparar al crear ficha (PHB p. 114).

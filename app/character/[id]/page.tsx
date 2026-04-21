@@ -4,6 +4,7 @@ import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
 import { ABILITIES, ABILITY_LABEL, SKILLS, abilityMod, CharacterSchema, effectiveAbility, initiative, proficiencyBonus, savingThrow, skillBonus } from "@/lib/character";
 import { findFeat } from "@/lib/feats";
+import { SpellDailyPrep } from "./SpellDailyPrep";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,14 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
           <p className="label mb-3">Vitales</p>
           <div className="grid grid-cols-2 gap-3">
             <Stat label="HP" value={`${ch.hp.current}/${ch.hp.max}`} />
-            <Stat label="CA" value={ch.ac} />
+            <div>
+              <Stat label="CA" value={ch.ac} />
+              {(ch.acOtherBonus ?? 0) !== 0 && (
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                  Anotado +{ch.acOtherBonus} por objetos mágicos (PHB).
+                </p>
+              )}
+            </div>
             <Stat label="Iniciativa" value={fmt(initiative(ch))} />
             <Stat label="Vel." value={`${ch.speed} ft`} />
           </div>
@@ -106,6 +114,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
 
       {(ch.spells.known.length > 0 || Object.keys(ch.spells.slots).length > 0) && (
         <div className="mt-6 card">
+          <SpellDailyPrep character={ch} />
           <div className="mb-3 flex items-center justify-between">
             <p className="label">Conjuros</p>
             {ch.spells.ability && (

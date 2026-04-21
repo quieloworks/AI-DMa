@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  backgroundToolPickSpecs,
+  resolveBackgroundTools,
+  toolsInPool,
+  validateBackgroundToolPicks,
+  validateClassToolPicks,
+} from "@/lib/tools";
 import { useRouter } from "next/navigation";
 import {
   ABILITIES,
@@ -16,22 +23,39 @@ import {
   asiLevelsForClass,
   computeAc,
   firstLevelSpellPicks,
-  maxHpAtLevel1,
+  maxCastableSpellLevel,
+  maxHpAtLevel,
   pointBuyTotal,
   proficiencyBonus,
   spellSlotsFor,
   wizardPreparedCount,
+  fightingStylesForClass,
+  fightingStyleSlots,
+  FIGHTING_STYLES,
   type Ability,
+  type FightingStyleId,
   type BackgroundBasics,
   type ClassBasics,
   type EquipmentItem,
+  type FightingStyle,
   type RaceBasics,
   type RaceVariant,
 } from "@/lib/character";
-import { SPELLS, spellsForClassAtLevel, type Spell, type SpellClassId } from "@/lib/spells";
+import { SPELLS, spellsForClassAtLevel, spellsForClassUpToLevel, type Spell, type SpellClassId } from "@/lib/spells";
 import { FEATS, type Feat } from "@/lib/feats";
 
-type Step = "race" | "class" | "background" | "abilities" | "feats" | "skills" | "spells" | "details" | "equipo" | "review";
+type Step =
+  | "race"
+  | "class"
+  | "background"
+  | "abilities"
+  | "feats"
+  | "skills"
+  | "spells"
+  | "details"
+  | "estilo"
+  | "equipo"
+  | "review";
 
 const STEPS: { id: Step; label: string }[] = [
   { id: "race", label: "Raza" },
@@ -42,6 +66,7 @@ const STEPS: { id: Step; label: string }[] = [
   { id: "skills", label: "Habilidades" },
   { id: "spells", label: "Conjuros" },
   { id: "details", label: "Detalles" },
+  { id: "estilo", label: "Estilo de combate" },
   { id: "equipo", label: "Equipo" },
   { id: "review", label: "Revisión" },
 ];
@@ -89,9 +114,34 @@ export function CharacterWizard() {
   const [keepBgEquipmentOnRoll, setKeepBgEquipmentOnRoll] = useState(true);
   const [rolledGold, setRolledGold] = useState<number | null>(null);
   const [goldRolls, setGoldRolls] = useState<number[]>([]);
+  const [chosenFightingStyles, setChosenFightingStyles] = useState<string[]>([]);
+  const [classToolPicks, setClassToolPicks] = useState<string[]>([]);
+  const [bgToolPicks, setBgToolPicks] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const stepIdx = STEPS.findIndex((s) => s.id === step);
+
+  useEffect(() => {
+    setClassToolPicks([]);
+  }, [klass?.id]);
+
+  useEffect(() => {
+    if (!background) {
+      setBgToolPicks([]);
+      return;
+    }
+    const n = backgroundToolPickSpecs(background).length;
+    setBgToolPicks(Array.from({ length: n }, () => ""));
+  }, [background?.id]);
+
+  const reviewTools = useMemo(() => {
+    if (!klass || !background) return [];
+    const bgPart =
+      backgroundToolPickSpecs(background).length > 0
+        ? resolveBackgroundTools(background, bgToolPicks)
+        : [...background.tools];
+    return mergeUnique([...(klass.toolProficiencies ?? []), ...classToolPicks.filter(Boolean), ...bgPart]);
+  }, [klass, background, classToolPicks, bgToolPicks]);
 
   const variant = useMemo<RaceVariant | null>(() => {
     if (!race?.variants || !variantId) return null;
@@ -180,7 +230,10 @@ export function CharacterWizard() {
 
   const conMod = abilityMod(effective.con);
   const hpBonusPerLevel = variant?.hpBonusPerLevel ?? 0;
-  const maxHp = klass ? maxHpAtLevel1(klass.hitDie, conMod) + hpBonusPerLevel * level : 0;
+  // PHB p. 15 ("Hit Points at Higher Levels"): nivel 1 = máximo del dado + mod CON; niveles
+  // posteriores = promedio del dado (redondeo hacia arriba) + mod CON. Usamos la modalidad
+  // "average" vía maxHpAtLevel y sumamos los rasgos raciales por nivel (p. ej. Enano de las colinas).
+  const maxHp = klass ? maxHpAtLevel(level, klass.hitDie, conMod) + hpBonusPerLevel * level : 0;
   const prof = proficiencyBonus(level);
 
   const equipmentChoiceComplete = useMemo(() => {
@@ -194,6 +247,21 @@ export function CharacterWizard() {
   const featSlots = (race?.bonusFeats ?? 0) + (variant?.bonusFeats ?? 0);
   const asiSlots = klass ? asiCountForClassAtLevel(klass.id, level) : 0;
   const featsStepVisible = featSlots > 0 || asiSlots > 0;
+  const styleSlots = klass ? fightingStyleSlots(klass.id, level) : 0;
+
+  useEffect(() => {
+    if (!klass) {
+      setChosenFightingStyles([]);
+      return;
+    }
+    const slots = fightingStyleSlots(klass.id, level);
+    setChosenFightingStyles((prev) => {
+      if (slots === 0) return [];
+      const allowed = new Set<string>(fightingStylesForClass(klass.id).map((s) => s.id));
+      const filtered = [...new Set(prev.filter((sid) => allowed.has(sid)))];
+      return filtered.slice(0, slots);
+    });
+  }, [klass, level]);
 
   useEffect(() => {
     setAsiChoices((prev) => {
@@ -203,9 +271,21 @@ export function CharacterWizard() {
     });
   }, [asiSlots]);
 
+  useEffect(() => {
+    if (!klass?.spellcasting) return;
+    const maxLv = maxCastableSpellLevel(klass.spellcasting.caster, level);
+    const cid = klass.id as SpellClassId;
+    setChosenSpells((prev) =>
+      prev.filter((id) => {
+        const sp = SPELLS.find((s) => s.id === id);
+        return Boolean(sp && sp.level >= 1 && sp.level <= maxLv && sp.classes.includes(cid));
+      }),
+    );
+  }, [klass?.id, klass?.spellcasting, level]);
+
   const cantripsExpected = klass?.spellcasting?.cantripsKnown ?? 0;
   const spellsExpected = klass?.spellcasting
-    ? firstLevelSpellPicks(klass.spellcasting, level, effective[klass.spellcasting.ability])
+    ? firstLevelSpellPicks(klass.spellcasting, level, effective[klass.spellcasting.ability], klass.id)
     : 0;
   // Mago: tras copiar `spellbookCount` al grimorio, prepara `nivel + mod INT` cada día (PHB p. 114).
   const preparedExpected =
@@ -250,9 +330,11 @@ export function CharacterWizard() {
         abilityScores: abilities,
         racialBonus,
         klassId: klass?.id,
+        fightingStyles: chosenFightingStyles as FightingStyleId[],
+        otherAcBonus: 0,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [abilities, racialBonus, klass, background, equipmentChoices, moneyMethod, keepBgEquipmentOnRoll],
+    [abilities, racialBonus, klass, background, equipmentChoices, moneyMethod, keepBgEquipmentOnRoll, chosenFightingStyles],
   );
 
   function buildMoney() {
@@ -270,6 +352,15 @@ export function CharacterWizard() {
     const combinedSkills = mergeUnique(skills, bonusSkills);
     const baseLangs = mergeUnique(race.languages, variant?.extraLanguages);
     const allLanguages = mergeUnique(baseLangs, chosenLanguages);
+    const fightingStyleFeatures = chosenFightingStyles.map((fid) => {
+      const st = FIGHTING_STYLES.find((x) => x.id === fid);
+      return {
+        name: st ? `Estilo de combate: ${st.label}` : "Estilo de combate",
+        source: klass.label,
+        text: st?.summary ?? "",
+      };
+    });
+
     const payload = {
       name,
       playerName: playerName || undefined,
@@ -280,17 +371,25 @@ export function CharacterWizard() {
       alignment,
       abilities,
       abilityRacialBonus: racialBonus,
+      fightingStyles: chosenFightingStyles,
       skills: combinedSkills,
       savingThrows: klass.savingThrows,
       hp: { max: maxHp, current: maxHp, temp: 0, hitDie: klass.hitDie },
       ac,
+      acOtherBonus: 0,
       speed: effectiveSpeed,
       initiativeBonus: 0,
       subrace: variant?.id,
       proficiencies: {
         armor: mergeUnique(klass.armorProficiencies, variant?.extraArmorProficiencies),
         weapons: mergeUnique(klass.weaponProficiencies, variant?.extraWeaponProficiencies),
-        tools: [...(klass.toolProficiencies ?? []), ...background.tools],
+        tools: mergeUnique([
+          ...(klass.toolProficiencies ?? []),
+          ...classToolPicks.filter(Boolean),
+          ...(backgroundToolPickSpecs(background).length > 0
+            ? resolveBackgroundTools(background, bgToolPicks)
+            : background.tools),
+        ]),
         languages: allLanguages,
       },
       equipment,
@@ -308,6 +407,14 @@ export function CharacterWizard() {
                 ...(variant?.grantedCantrips ?? []),
               ],
               preparation: klass.spellcasting.preparation,
+              preparedCaster:
+                klass.spellcasting.preparation === "prepared"
+                  ? {
+                      classId: klass.id as SpellClassId,
+                      characterLevel: level,
+                      caster: klass.spellcasting.caster,
+                    }
+                  : undefined,
             }),
             slots: Object.fromEntries(spellSlotsFor(klass.spellcasting.caster, level).map((n, i) => [String(i + 1), { max: n, used: 0 }])),
           }
@@ -324,7 +431,7 @@ export function CharacterWizard() {
             }),
             slots: {},
           },
-      features: [{ name: background.feature.name, source: background.label, text: background.feature.text }],
+      features: [{ name: background.feature.name, source: background.label, text: background.feature.text }, ...fightingStyleFeatures],
       feats: [
         ...chosenFeats,
         ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
@@ -338,6 +445,7 @@ export function CharacterWizard() {
   function isSkipped(id: Step) {
     if (id === "spells" && !spellsStepVisible) return true;
     if (id === "feats" && !featsStepVisible) return true;
+    if (id === "estilo" && styleSlots === 0) return true;
     return false;
   }
   function goNext() {
@@ -397,6 +505,8 @@ export function CharacterWizard() {
       const classSkills = skills.filter((s) => !bgSet.has(s));
       if (classSkills.length !== klass.skillChoices.count) return true;
       if (racialBonusSkills > 0 && bonusSkills.length !== racialBonusSkills) return true;
+      if (klass.toolPicks && !validateClassToolPicks(klass.toolPicks, classToolPicks)) return true;
+      if (background && !validateBackgroundToolPicks(background, bgToolPicks)) return true;
       return false;
     }
     if (step === "spells") {
@@ -405,11 +515,27 @@ export function CharacterWizard() {
       if (chosenSpells.length !== spellsExpected) return true;
       if (racialCantripChoice && chosenRacialCantrip.length !== racialCantripChoice.count) return true;
       if (preparedExpected > 0 && chosenPrepared.length !== preparedExpected) return true;
+      if (klass?.spellcasting) {
+        const maxLv = maxCastableSpellLevel(klass.spellcasting.caster, level);
+        const cid = klass.id as SpellClassId;
+        for (const id of chosenSpells) {
+          const sp = SPELLS.find((s) => s.id === id);
+          if (!sp || sp.level < 1 || sp.level > maxLv || !sp.classes.includes(cid)) return true;
+        }
+        for (const id of chosenPrepared) {
+          if (!chosenSpells.includes(id)) return true;
+        }
+      }
       return false;
     }
     if (step === "equipo") {
       if (moneyMethod === "fixed") return !equipmentChoiceComplete;
       return rolledGold == null;
+    }
+    if (step === "estilo" && klass && styleSlots > 0) {
+      if (chosenFightingStyles.length !== styleSlots) return true;
+      const allowed = new Set<string>(fightingStylesForClass(klass.id).map((s) => s.id));
+      return chosenFightingStyles.some((sid) => !allowed.has(sid));
     }
     if (step === "details") return !name.trim();
     return false;
@@ -462,6 +588,7 @@ export function CharacterWizard() {
                 setChosenCantrips([]);
                 setChosenSpells([]);
                 setChosenPrepared([]);
+                setChosenFightingStyles([]);
               }}
             />
           )}
@@ -521,6 +648,10 @@ export function CharacterWizard() {
               bonusSkills={bonusSkills}
               setBonusSkills={setBonusSkills}
               racialBonusSkills={racialBonusSkills}
+              classToolPicks={classToolPicks}
+              setClassToolPicks={setClassToolPicks}
+              bgToolPicks={bgToolPicks}
+              setBgToolPicks={setBgToolPicks}
             />
           )}
           {step === "spells" && (
@@ -528,6 +659,7 @@ export function CharacterWizard() {
               klass={klass}
               race={race}
               variant={variant}
+              characterLevel={level}
               cantripsExpected={cantripsExpected}
               spellsExpected={spellsExpected}
               preparedExpected={preparedExpected}
@@ -555,6 +687,15 @@ export function CharacterWizard() {
               setAlignment={setAlignment}
               level={level}
               setLevel={setLevel}
+            />
+          )}
+          {step === "estilo" && klass && (
+            <FightingStyleStep
+              klass={klass}
+              styleSlots={styleSlots}
+              options={fightingStylesForClass(klass.id)}
+              chosen={chosenFightingStyles}
+              setChosen={setChosenFightingStyles}
             />
           )}
           {step === "equipo" && (
@@ -594,6 +735,8 @@ export function CharacterWizard() {
                 ...chosenFeats,
                 ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
               ]}
+              fightingStyles={chosenFightingStyles}
+              tools={reviewTools}
               spells={buildKnownSpells({
                 chosenCantrips,
                 chosenSpells,
@@ -604,6 +747,14 @@ export function CharacterWizard() {
                   ...(variant?.grantedCantrips ?? []),
                 ],
                 preparation: klass?.spellcasting?.preparation,
+                preparedCaster:
+                  klass?.spellcasting?.preparation === "prepared" && klass?.spellcasting
+                    ? {
+                        classId: klass.id as SpellClassId,
+                        characterLevel: level,
+                        caster: klass.spellcasting.caster,
+                      }
+                    : undefined,
               })}
             />
           )}
@@ -1175,6 +1326,10 @@ function SkillsStep({
   bonusSkills,
   setBonusSkills,
   racialBonusSkills,
+  classToolPicks,
+  setClassToolPicks,
+  bgToolPicks,
+  setBgToolPicks,
 }: {
   klass: ClassBasics | null;
   bg: BackgroundBasics | null;
@@ -1185,6 +1340,10 @@ function SkillsStep({
   bonusSkills: string[];
   setBonusSkills: (s: string[]) => void;
   racialBonusSkills: number;
+  classToolPicks: string[];
+  setClassToolPicks: Dispatch<SetStateAction<string[]>>;
+  bgToolPicks: string[];
+  setBgToolPicks: Dispatch<SetStateAction<string[]>>;
 }) {
   const bgSkills = new Set(bg?.skillProficiencies ?? []);
   const classList = new Set(klass?.skillChoices.from ?? []);
@@ -1225,6 +1384,17 @@ function SkillsStep({
   }
 
   const bonusPicksRemaining = Math.max(0, racialBonusSkills - bonusSkills.length);
+  const bgToolSpecs = backgroundToolPickSpecs(bg);
+  const rule = klass.toolPicks;
+
+  function toggleClassInstrument(name: string) {
+    if (!rule || rule.pool !== "instruments") return;
+    setClassToolPicks((prev) => {
+      if (prev.includes(name)) return prev.filter((x) => x !== name);
+      if (prev.length >= rule.count) return prev;
+      return [...prev, name];
+    });
+  }
 
   return (
     <div>
@@ -1301,6 +1471,93 @@ function SkillsStep({
           </div>
         </div>
       )}
+
+      {(rule || bgToolSpecs.length > 0) && (
+        <div className="mt-8 space-y-6">
+          <p className="label">Competencias en herramientas (PHB cap. 5)</p>
+          {rule?.pool === "instruments" && (
+            <div className="card">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                  {klass.label}: elige {rule.count} instrumentos musicales distintos.
+                </p>
+                <span className="badge" style={{ color: classToolPicks.length === rule.count ? "var(--color-accent)" : undefined }}>
+                  {classToolPicks.length}/{rule.count}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                {toolsInPool("instruments").map((inst) => {
+                  const checked = classToolPicks.includes(inst);
+                  const disabled = !checked && classToolPicks.length >= rule.count;
+                  return (
+                    <label
+                      key={inst}
+                      className={checked ? "card-accent flex items-center justify-between py-2" : "card flex items-center justify-between py-2"}
+                      style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
+                    >
+                      <span className="text-sm">{inst}</span>
+                      <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleClassInstrument(inst)} />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {rule?.pool === "artisan-or-instrument" && (
+            <div className="card">
+              <label className="block">
+                <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                  {klass.label}: una herramienta de artesano o un instrumento musical (a elección).
+                </span>
+                <select
+                  className="input mt-2 w-full max-w-md"
+                  value={classToolPicks[0] ?? ""}
+                  onChange={(e) => setClassToolPicks(e.target.value ? [e.target.value] : [])}
+                >
+                  <option value="">— Elige —</option>
+                  {toolsInPool("artisan-or-instrument").map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+          {bgToolSpecs.length > 0 && (
+            <div className="card space-y-4">
+              <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                Trasfondo ({bg.label}): concreta las competencias genéricas del PHB.
+              </p>
+              {bgToolSpecs.map((spec, i) => (
+                <label key={`${bg.id}-tool-${i}`} className="block">
+                  <span className="label">Elección {i + 1}</span>
+                  <select
+                    className="input mt-2 w-full max-w-md"
+                    value={bgToolPicks[i] ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBgToolPicks((prev) => {
+                        const next = [...prev];
+                        while (next.length < bgToolSpecs.length) next.push("");
+                        next[i] = v;
+                        return next.slice(0, bgToolSpecs.length);
+                      });
+                    }}
+                  >
+                    <option value="">— Elige —</option>
+                    {toolsInPool(spec.pool).map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1361,6 +1618,55 @@ function DetailsStep({
           ))}
         </select>
       </label>
+    </div>
+  );
+}
+
+function FightingStyleStep({
+  klass,
+  styleSlots,
+  options,
+  chosen,
+  setChosen,
+}: {
+  klass: ClassBasics;
+  styleSlots: number;
+  options: FightingStyle[];
+  chosen: string[];
+  setChosen: (ids: string[]) => void;
+}) {
+  function pick(id: string) {
+    if (styleSlots <= 1) {
+      setChosen(chosen[0] === id ? [] : [id]);
+      return;
+    }
+    const set = new Set(chosen);
+    if (set.has(id)) set.delete(id);
+    else if (chosen.length < styleSlots) set.add(id);
+    setChosen(Array.from(set));
+  }
+
+  return (
+    <div>
+      <p className="mb-4 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+        Tu clase ({klass.label}) obtiene {styleSlots === 1 ? "un estilo de combate" : `${styleSlots} estilos de combate`} según el PHB: elige de la lista.
+      </p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {options.map((s) => {
+          const active = chosen.includes(s.id);
+          return (
+            <button key={s.id} type="button" onClick={() => pick(s.id)} className={active ? "card-accent text-left" : "card text-left"}>
+              <h3>{s.label}</h3>
+              <p className="mt-2 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                {s.summary}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-xs" style={{ color: "var(--color-text-hint)" }}>
+        Elige {styleSlots} opción{styleSlots === 1 ? "" : "es"}. La CA con el estilo Defensa sólo suma si llevas armadura corporal (PHB).
+      </p>
     </div>
   );
 }
@@ -1562,6 +1868,8 @@ function ReviewStep({
   skills,
   languages,
   feats,
+  fightingStyles,
+  tools,
   spells,
 }: {
   race: RaceBasics | null;
@@ -1580,8 +1888,13 @@ function ReviewStep({
   skills: string[];
   languages: string[];
   feats: string[];
+  fightingStyles: string[];
+  tools: string[];
   spells: { name: string; level: number; prepared: boolean }[];
 }) {
+  const fightingStyleRecords = fightingStyles
+    .map((fid) => FIGHTING_STYLES.find((st) => st.id === fid))
+    .filter((st): st is FightingStyle => st != null);
   const featRecords = feats
     .map((id) => FEATS.find((f) => f.id === id))
     .filter((f): f is Feat => f != null);
@@ -1625,6 +1938,31 @@ function ReviewStep({
         <p className="text-sm">{languages.length ? languages.join(", ") : "—"}</p>
       </div>
 
+      {tools.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Herramientas y otros</p>
+          <p className="text-sm">{tools.join(", ")}</p>
+        </div>
+      )}
+
+      {fightingStyleRecords.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Estilo de combate</p>
+          <ul className="space-y-3 text-sm">
+            {fightingStyleRecords.map((s) => (
+              <li key={s.id}>
+                <p>
+                  <strong>{s.label}</strong>
+                </p>
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                  {s.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {featRecords.length > 0 && (
         <div className="card">
           <p className="label mb-2">Dotes</p>
@@ -1649,9 +1987,9 @@ function ReviewStep({
               <li key={i}>
                 <span style={{ color: "var(--color-accent)" }}>{s.level === 0 ? "Truco" : `Nv ${s.level}`}</span> ·{" "}
                 {s.name}
-                {!s.prepared && (
+                {!s.prepared && s.level > 0 && (
                   <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    · en grimorio
+                    · {klass?.spellcasting?.preparation === "spellbook" ? "en grimorio" : "repertorio (no preparado)"}
                   </span>
                 )}
               </li>
@@ -1704,6 +2042,7 @@ function SpellsStep({
   klass,
   race,
   variant,
+  characterLevel,
   cantripsExpected,
   spellsExpected,
   preparedExpected,
@@ -1720,6 +2059,7 @@ function SpellsStep({
   klass: ClassBasics | null;
   race: RaceBasics | null;
   variant: RaceVariant | null;
+  characterLevel: number;
   cantripsExpected: number;
   spellsExpected: number;
   preparedExpected: number;
@@ -1734,14 +2074,17 @@ function SpellsStep({
   setChosenRacialCantrip: (s: string[]) => void;
 }) {
   const classId = (klass?.id ?? "") as SpellClassId;
+  const maxSpellLv = klass?.spellcasting ? maxCastableSpellLevel(klass.spellcasting.caster, characterLevel) : 1;
   const classCantrips = useMemo<Spell[]>(
     () => (classId ? spellsForClassAtLevel(classId, 0) : []),
     [classId],
   );
-  const classSpells = useMemo<Spell[]>(
-    () => (classId ? spellsForClassAtLevel(classId, 1) : []),
-    [classId],
-  );
+  const spellbookPreview = useMemo(() => {
+    return chosenSpells
+      .map((id) => SPELLS.find((s) => s.id === id))
+      .filter((s): s is Spell => s != null)
+      .sort((a, b) => (a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, "es")));
+  }, [chosenSpells]);
   const racialPool = useMemo<Spell[]>(() => {
     if (!racialCantripChoice) return [];
     return spellsForClassAtLevel(racialCantripChoice.fromClass as SpellClassId, 0);
@@ -1768,16 +2111,23 @@ function SpellsStep({
     setList(Array.from(set));
   };
 
+  function toggleLeveledSpell(id: string) {
+    const sp = SPELLS.find((s) => s.id === id);
+    if (sp && sp.level > maxSpellLv) return;
+    toggleFrom(chosenSpells, setChosenSpells, spellsExpected, id);
+  }
+
   const preparation = klass?.spellcasting?.preparation;
   const spellsAbility = klass?.spellcasting?.ability;
-  const spellsLabel = preparation === "spellbook"
-    ? `Grimorio inicial: elige ${spellsExpected} conjuros de nivel 1 para copiarlos a tu libro`
-    : preparation === "prepared" && spellsAbility
-      ? `Conjuros preparados (nivel + mod ${ABILITY_LABEL[spellsAbility]}): elige ${spellsExpected}`
-      : `Conjuros conocidos: elige ${spellsExpected} conjuros de nivel 1`;
+  const spellsLabel =
+    preparation === "spellbook"
+      ? `Grimorio: elige ${spellsExpected} conjuros para tu libro (nivel máximo ${maxSpellLv}; puedes mezclar niveles)`
+      : preparation === "prepared" && spellsAbility
+        ? `Lista de clase (hasta nv. ${maxSpellLv}): marca ${spellsExpected} conjuros preparados para empezar; el resto queda en tu repertorio sin preparar (PHB: tras un descanso largo puedes cambiar en la ficha).`
+        : `Conjuros conocidos (hasta nivel ${maxSpellLv}): elige ${spellsExpected}`;
 
   const introText = klass?.spellcasting
-    ? `Selecciona los trucos y conjuros que tu ${klass.label.toLowerCase()} conoce al nivel 1.`
+    ? `Selecciona los trucos y conjuros de tu ${klass.label.toLowerCase()} al nivel ${characterLevel} (PHB).`
     : "Tu raza te otorga conjuros raciales que completar.";
   const cantripsHeader = klass?.spellcasting
     ? `Trucos de ${klass.label.toLowerCase()}: elige ${cantripsExpected}`
@@ -1788,7 +2138,8 @@ function SpellsStep({
       <div className="card">
         <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
           {introText}
-          {preparation === "prepared" && " Los preparados cambian tras un descanso largo."}
+          {preparation === "prepared" &&
+            " Tras un descanso largo puedes cambiar qué conjuros de nv. ≥1 llevas preparados (PHB); en la hoja de personaje hay un panel para ello."}
           {preparation === "spellbook" && " Podrás preparar hasta nivel + mod INT de entre ellos cada día."}
         </p>
       </div>
@@ -1818,12 +2169,26 @@ function SpellsStep({
               {chosenSpells.length}/{spellsExpected}
             </span>
           </div>
-          <SpellGrid
-            spells={classSpells}
-            selected={chosenSpells}
-            onToggle={(id) => toggleFrom(chosenSpells, setChosenSpells, spellsExpected, id)}
-            max={spellsExpected}
-          />
+          <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
+            No puedes elegir conjuros de un nivel superior al de tus ranuras ({maxSpellLv}).
+          </p>
+          {Array.from({ length: maxSpellLv }, (_, i) => i + 1).map((lv) => {
+            const row = classId ? spellsForClassAtLevel(classId, lv) : [];
+            if (row.length === 0) return null;
+            return (
+              <div key={lv} className="mb-5">
+                <p className="mb-2 text-xs uppercase" style={{ color: "var(--color-text-hint)", letterSpacing: "0.06em" }}>
+                  Nivel {lv}
+                </p>
+                <SpellGrid
+                  spells={row}
+                  selected={chosenSpells}
+                  onToggle={toggleLeveledSpell}
+                  max={spellsExpected}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1841,7 +2206,7 @@ function SpellsStep({
             El resto permanecen en tu libro sin preparar (PHB p. 114). Podrás cambiarlos tras un descanso largo.
           </p>
           <SpellGrid
-            spells={classSpells.filter((s) => chosenSpells.includes(s.id))}
+            spells={spellbookPreview}
             selected={chosenPrepared}
             onToggle={(id) => toggleFrom(chosenPrepared, setChosenPrepared, preparedExpected, id)}
             max={preparedExpected}
@@ -2452,8 +2817,22 @@ function buildKnownSpells(params: {
   chosenRacialCantrip: string[];
   grantedRacialCantrips: { spellId: string; ability: Ability }[];
   preparation?: "known" | "prepared" | "spellbook";
+  /** Clérigo / druida / paladín: repertorio completo en ficha, subconjunto preparado (PHB cap. 10). */
+  preparedCaster?: {
+    classId: SpellClassId;
+    characterLevel: number;
+    caster: NonNullable<ClassBasics["spellcasting"]>["caster"];
+  };
 }): { name: string; level: number; prepared: boolean }[] {
-  const { chosenCantrips, chosenSpells, chosenPrepared, chosenRacialCantrip, grantedRacialCantrips, preparation } = params;
+  const {
+    chosenCantrips,
+    chosenSpells,
+    chosenPrepared,
+    chosenRacialCantrip,
+    grantedRacialCantrips,
+    preparation,
+    preparedCaster,
+  } = params;
   const out: { name: string; level: number; prepared: boolean }[] = [];
   const seen = new Set<string>();
   const push = (spellId: string, prepared: boolean) => {
@@ -2466,13 +2845,20 @@ function buildKnownSpells(params: {
   for (const id of chosenCantrips) push(id, true);
   for (const id of chosenRacialCantrip) push(id, true);
   for (const g of grantedRacialCantrips) push(g.spellId, true);
-  // Mago con grimorio (PHB p. 114): copia `spellbookCount` conjuros y prepara `nivel + mod INT`.
-  // Los marcados en `chosenPrepared` van como preparados; el resto queda en el libro (prepared: false).
-  // Clérigo, druida, paladín y lanzadores "known" (bardo, hechicero, brujo, explorador) van todos como
-  // preparados porque no llevan grimorio.
+  // Mago con grimorio (PHB p. 114): copia al libro y prepara un subconjunto.
   if (preparation === "spellbook") {
     const preparedSet = new Set(chosenPrepared);
     for (const id of chosenSpells) push(id, preparedSet.has(id));
+  } else if (preparation === "prepared" && preparedCaster) {
+    const maxLv = maxCastableSpellLevel(preparedCaster.caster, preparedCaster.characterLevel);
+    if (maxLv >= 1) {
+      const full = spellsForClassUpToLevel(preparedCaster.classId, maxLv).filter((s) => s.level >= 1);
+      full.sort((a, b) => (a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, "es")));
+      const preparedSet = new Set(chosenSpells);
+      for (const s of full) push(s.id, preparedSet.has(s.id));
+    } else {
+      for (const id of chosenSpells) push(id, true);
+    }
   } else {
     for (const id of chosenSpells) push(id, true);
   }

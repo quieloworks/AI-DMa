@@ -46,6 +46,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
       abilities: draft.abilities,
       hp: draft.hp,
       ac: draft.ac,
+      acOtherBonus: draft.acOtherBonus ?? 0,
       speed: draft.speed,
       initiativeBonus: draft.initiativeBonus,
       equipment,
@@ -130,7 +131,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Field label="HP máx.">
             <input
               type="number"
@@ -155,12 +156,23 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patchHp({ temp: clampInt(e.target.value, 0, 999) })}
             />
           </Field>
-          <Field label="CA">
+          <Field label="CA (total en juego)">
             <input
               type="number"
               className="input mt-2"
               value={draft.ac}
               onChange={(e) => patch({ ac: clampInt(e.target.value, 5, 30) })}
+            />
+          </Field>
+          <Field
+            label="Bonif. CA por objetos mágicos"
+            hint="Sólo anotación PHB (anillo de protección, armadura +1, etc.). Súmalo mentalmente a la CA base o inclúyelo ya en el campo CA."
+          >
+            <input
+              type="number"
+              className="input mt-2"
+              value={draft.acOtherBonus ?? 0}
+              onChange={(e) => patch({ acOtherBonus: clampInt(e.target.value, -5, 10) })}
             />
           </Field>
         </div>
