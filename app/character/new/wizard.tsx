@@ -149,6 +149,33 @@ export function CharacterWizard() {
     return e;
   }, [abilities, racialBonus]);
 
+  // Tope RAW de 20 en atributos (PHB p. 12, recuadro "Ability Score Improvement": "You can't
+  // increase an ability score above 20 using this feature"; íd. en descripción de cada dote
+  // con ASI parcial, PHB p. 165). Para cada slot ASI calculamos el total del atributo que
+  // tendrías EXCLUYENDO la contribución de ese mismo slot; dentro de AsiSlot se usa para
+  // deshabilitar botones cuya selección rompería el tope.
+  const asiSlotPreTotals = useMemo<Record<Ability, number>[]>(() => {
+    return asiChoices.map((choice) => {
+      const slotContrib: Record<Ability, number> = { fue: 0, des: 0, con: 0, int: 0, sab: 0, car: 0 };
+      if (choice.kind === "asi") {
+        if (choice.picks.length === 1) slotContrib[choice.picks[0]] += 2;
+        else if (choice.picks.length === 2) {
+          slotContrib[choice.picks[0]] += 1;
+          slotContrib[choice.picks[1]] += 1;
+        }
+      } else if (choice.kind === "feat") {
+        const feat = FEATS.find((f) => f.id === choice.featId);
+        if (feat?.abilityBonus) {
+          const ab = feat.abilityBonus.from.length === 1 ? feat.abilityBonus.from[0] : choice.abilityChoice;
+          if (ab) slotContrib[ab] += feat.abilityBonus.value;
+        }
+      }
+      const pre: Record<Ability, number> = { fue: 0, des: 0, con: 0, int: 0, sab: 0, car: 0 };
+      for (const ab of ABILITIES) pre[ab] = abilities[ab] + (racialBonus[ab] ?? 0) - slotContrib[ab];
+      return pre;
+    });
+  }, [asiChoices, abilities, racialBonus]);
+
   const effectiveSpeed = variant?.speedOverride ?? race?.speed ?? 30;
 
   const conMod = abilityMod(effective.con);
@@ -358,6 +385,11 @@ export function CharacterWizard() {
           if (feat.abilityBonus && feat.abilityBonus.from.length > 1 && !ch.abilityChoice) return true;
         }
       }
+      // Tope RAW de 20 (PHB p. 12). Defensa en profundidad por si alguna ruta
+      // dejó un atributo > 20 (las UI de AsiSlot / FeatList ya deshabilitan las acciones).
+      for (const ab of ABILITIES) {
+        if (abilities[ab] + (racialBonus[ab] ?? 0) > 20) return true;
+      }
       return false;
     }
     if (step === "skills" && klass) {
@@ -475,6 +507,7 @@ export function CharacterWizard() {
               asiChoices={asiChoices}
               setAsiChoices={setAsiChoices}
               asiLevels={klass ? asiLevelsForClass(klass.id, level) : []}
+              asiSlotPreTotals={asiSlotPreTotals}
             />
           )}
           {step === "skills" && (
@@ -1921,6 +1954,7 @@ function FeatsStep({
   asiChoices,
   setAsiChoices,
   asiLevels,
+  asiSlotPreTotals,
 }: {
   slots: number;
   chosen: string[];
@@ -1931,6 +1965,7 @@ function FeatsStep({
   asiChoices: AsiChoice[];
   setAsiChoices: (v: AsiChoice[] | ((prev: AsiChoice[]) => AsiChoice[])) => void;
   asiLevels: number[];
+  asiSlotPreTotals: Record<Ability, number>[];
 }) {
   const toggle = (id: string) => {
     const next = new Set(chosen);
@@ -2007,6 +2042,7 @@ function FeatsStep({
                       .flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
                   )
                 }
+                preTotals={asiSlotPreTotals[idx]}
               />
             ))}
           </div>
@@ -2112,6 +2148,7 @@ function AsiSlot({
   onChange,
   reservedRacial,
   reservedOtherSlots,
+  preTotals,
 }: {
   idx: number;
   level?: number;
@@ -2119,16 +2156,57 @@ function AsiSlot({
   onChange: (next: AsiChoice) => void;
   reservedRacial: Set<string>;
   reservedOtherSlots: Set<string>;
+  preTotals: Record<Ability, number>;
 }) {
+  const ABILITY_CAP = 20;
+  // Dado un estado de `picks` propuesto, convierte a contribución por atributo siguiendo
+  // la misma regla que `racialBonus` (1 pick → +2; 2 picks distintos → +1 cada uno).
+  const picksContribution = (picks: Ability[]): Record<Ability, number> => {
+    const c: Record<Ability, number> = { fue: 0, des: 0, con: 0, int: 0, sab: 0, car: 0 };
+    if (picks.length === 1) c[picks[0]] += 2;
+    else if (picks.length === 2) {
+      c[picks[0]] += 1;
+      c[picks[1]] += 1;
+    }
+    return c;
+  };
+  const wouldExceedCap = (contrib: Record<Ability, number>): boolean => {
+    for (const ab of ABILITIES) {
+      if ((preTotals?.[ab] ?? 0) + contrib[ab] > ABILITY_CAP) return true;
+    }
+    return false;
+  };
+  const computeNextPicks = (picks: Ability[], ab: Ability): Ability[] => {
+    if (picks.length === 1 && picks[0] === ab) return [];
+    if (picks.length === 2 && picks.includes(ab)) return picks.filter((p) => p !== ab);
+    if (picks.length === 0) return [ab];
+    if (picks.length === 1) return picks[0] === ab ? [ab, ab] : [picks[0], ab];
+    return [picks[1], ab];
+  };
+  const abilityButtonBlocked = (ab: Ability): boolean => {
+    if (value.kind !== "asi") return false;
+    const next = computeNextPicks(value.picks, ab);
+    const nextContrib = picksContribution(next);
+    const currContrib = picksContribution(value.picks);
+    // Sólo bloquear si la nueva selección INCREMENTA la contribución al algún atributo
+    // capado; permitir siempre "quitar" (decrementar) aunque el estado actual ya exceda.
+    for (const a of ABILITIES) {
+      if (nextContrib[a] > currContrib[a] && (preTotals?.[a] ?? 0) + nextContrib[a] > ABILITY_CAP) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const setKind = (kind: "asi" | "feat") => {
     if (kind === "asi") onChange({ kind: "asi", picks: [] });
     else onChange({ kind: "feat", featId: "" });
   };
   const toggleAsiPick = (ab: Ability) => {
     if (value.kind !== "asi") return;
+    if (abilityButtonBlocked(ab)) return;
     const picks = value.picks;
     if (picks.length === 1 && picks[0] === ab) {
-      // Doble click: alterna de "+2 a uno" a vacío.
       onChange({ kind: "asi", picks: [] });
       return;
     }
@@ -2145,11 +2223,15 @@ function AsiSlot({
       else onChange({ kind: "asi", picks: [picks[0], ab] });
       return;
     }
-    // picks.length === 2 y no incluye ab: reemplaza el primero.
     onChange({ kind: "asi", picks: [picks[1], ab] });
   };
+  const canUpgradeSingleToDouble =
+    value.kind === "asi" &&
+    value.picks.length === 1 &&
+    (preTotals?.[value.picks[0]] ?? 0) + 2 <= ABILITY_CAP;
   const upgradeSingleToDouble = () => {
     if (value.kind !== "asi" || value.picks.length !== 1) return;
+    if (!canUpgradeSingleToDouble) return;
     onChange({ kind: "asi", picks: [value.picks[0], value.picks[0]] });
   };
   const pickFeat = (featId: string) => {
@@ -2158,6 +2240,12 @@ function AsiSlot({
   const pickFeatAbility = (ab: Ability) => {
     if (value.kind !== "feat") return;
     onChange({ ...value, abilityChoice: ab });
+  };
+  // Un dote queda bloqueado si todas sus opciones de +ASI empujarían algún atributo por encima de 20.
+  const featBlockedByCap = (feat: Feat): boolean => {
+    if (!feat.abilityBonus) return false;
+    const options = feat.abilityBonus.from;
+    return options.every((ab) => (preTotals?.[ab] ?? 0) + feat.abilityBonus!.value > ABILITY_CAP);
   };
 
   const asiSummary =
@@ -2212,12 +2300,22 @@ function AsiSlot({
           <div className="flex flex-wrap gap-2">
             {ABILITIES.map((ab) => {
               const count = value.picks.filter((p) => p === ab).length;
+              const blocked = abilityButtonBlocked(ab);
+              const atCap = (preTotals?.[ab] ?? 0) >= ABILITY_CAP;
               return (
                 <button
                   key={ab}
                   onClick={() => toggleAsiPick(ab)}
+                  disabled={blocked}
                   className={count > 0 ? "btn-accent" : "btn-ghost"}
-                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  style={{ padding: "4px 10px", fontSize: 12, opacity: blocked ? 0.5 : 1 }}
+                  title={
+                    blocked
+                      ? atCap
+                        ? `${ABILITY_LABEL[ab]} ya está en 20 (tope RAW, PHB p. 12)`
+                        : `Subir ${ABILITY_LABEL[ab]} superaría el tope de 20 (PHB p. 12)`
+                      : undefined
+                  }
                 >
                   {ABILITY_LABEL[ab]}
                   {count > 0 && <span className="ml-1">+{count}</span>}
@@ -2228,8 +2326,14 @@ function AsiSlot({
           {value.picks.length === 1 && (
             <button
               onClick={upgradeSingleToDouble}
+              disabled={!canUpgradeSingleToDouble}
               className="btn-ghost mt-3"
-              style={{ padding: "4px 10px", fontSize: 12 }}
+              style={{ padding: "4px 10px", fontSize: 12, opacity: canUpgradeSingleToDouble ? 1 : 0.5 }}
+              title={
+                canUpgradeSingleToDouble
+                  ? undefined
+                  : `Subir ${ABILITY_LABEL[value.picks[0]]} otro +1 superaría el tope de 20`
+              }
             >
               Concentrar en +2 a {ABILITY_LABEL[value.picks[0]]}
             </button>
@@ -2248,7 +2352,8 @@ function AsiSlot({
               const reservedAsRacial = reservedRacial.has(feat.id);
               const reservedElsewhere = reservedOtherSlots.has(feat.id);
               const picked = value.featId === feat.id;
-              const disabled = !picked && (reservedAsRacial || reservedElsewhere);
+              const capBlocked = !picked && featBlockedByCap(feat);
+              const disabled = !picked && (reservedAsRacial || reservedElsewhere || capBlocked);
               const needsAbilityChoice = feat.abilityBonus && feat.abilityBonus.from.length > 1;
               return (
                 <div
@@ -2259,6 +2364,11 @@ function AsiSlot({
                   <label
                     className="flex items-start justify-between gap-3"
                     style={{ cursor: disabled ? "not-allowed" : "pointer" }}
+                    title={
+                      capBlocked
+                        ? `Su bono de +${feat.abilityBonus?.value} superaría el tope de 20 (PHB p. 12)`
+                        : undefined
+                    }
                   >
                     <div className="flex-1">
                       <p className="text-sm">
@@ -2271,6 +2381,11 @@ function AsiSlot({
                         {(reservedAsRacial || reservedElsewhere) && (
                           <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
                             · ya asignada
+                          </span>
+                        )}
+                        {capBlocked && (
+                          <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                            · atributo al tope de 20
                           </span>
                         )}
                       </p>
@@ -2297,16 +2412,26 @@ function AsiSlot({
                     <div className="mt-3">
                       <p className="label mb-2">Elige el atributo a +{feat.abilityBonus.value}</p>
                       <div className="flex flex-wrap gap-2">
-                        {feat.abilityBonus.from.map((ab) => (
-                          <button
-                            key={ab}
-                            onClick={() => pickFeatAbility(ab)}
-                            className={value.abilityChoice === ab ? "btn-accent" : "btn-ghost"}
-                            style={{ padding: "4px 10px", fontSize: 12 }}
-                          >
-                            {ABILITY_LABEL[ab]}
-                          </button>
-                        ))}
+                        {feat.abilityBonus.from.map((ab) => {
+                          const overCap =
+                            (preTotals?.[ab] ?? 0) + feat.abilityBonus!.value > ABILITY_CAP;
+                          return (
+                            <button
+                              key={ab}
+                              onClick={() => pickFeatAbility(ab)}
+                              disabled={overCap}
+                              className={value.abilityChoice === ab ? "btn-accent" : "btn-ghost"}
+                              style={{ padding: "4px 10px", fontSize: 12, opacity: overCap ? 0.5 : 1 }}
+                              title={
+                                overCap
+                                  ? `Subir ${ABILITY_LABEL[ab]} superaría el tope de 20 (PHB p. 12)`
+                                  : undefined
+                              }
+                            >
+                              {ABILITY_LABEL[ab]}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
