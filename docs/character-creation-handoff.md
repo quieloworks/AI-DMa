@@ -1,15 +1,12 @@
 # Character creation — Handoff
 
-> **RAW:** `docs/D&D 5E - Player's Handbook.pdf` · Texto buscable: `data/cache/handbook-pages.json` · `npm run ingest:handbook`
+> **RAW:** `docs/D&D 5E - Player's Handbook.pdf` · Texto buscable (si existe): `data/cache/handbook-pages.json` · `npm run ingest:handbook`
 
 ---
 
-## Pendiente (orden sugerido)
+## Pendiente
 
-1. **`asiChoices` en schema** (opcional) — persistir en `CharacterSchema` las elecciones del paso “Mejoras” si hace falta fuera del wizard.
-2. **PG rolados** (opcional) — alternativa a media en subida de nivel / creación.
-3. **Conjuros** — ampliar filas en `SPELLS` (`lib/spells.ts`) si la campaña pide más nombres del PHB.
-4. **Personajes antiguos (clérigo/druida/paladín)** — creados antes del repertorio completo: la ficha puede tener pocos conjuros en `known`; el panel de preparación sólo actúa sobre esa lista (regenerar personaje o ampliar en edición si hace falta el listado PHB completo).
+1. **Catálogo `SPELLS`** — añadir conjuros puntuales o niveles altos cuando la mesa los pida; no hace falta duplicar el PHB entero en código si no se usan.
 
 ---
 
@@ -17,12 +14,12 @@
 
 | Área | Archivo |
 | --- | --- |
-| Personaje / CA / clases | `lib/character.ts` (`computeAc` incluye `otherAcBonus`; `acOtherBonus` en schema) |
-| Conjuros | `lib/spells.ts` |
+| Personaje / PG / ASI / lista efectiva de conjuros | `lib/character.ts` (`effectiveSpellKnownForCharacter`, …) |
+| Catálogo y fusión repertorio preparados | `lib/spells.ts` (`mergePreparedCasterKnownWithCatalog`, …) |
 | Herramientas PHB | `lib/tools.ts` |
 | Pasivas / estilos (no CA) | `lib/rules-engine.ts` |
 | Wizard | `app/character/new/wizard.tsx` |
-| Preparación diaria en hoja | `app/character/[id]/SpellDailyPrep.tsx` |
+| Preparación diaria + hidratar BD | `app/character/[id]/SpellDailyPrep.tsx` |
 | Edición | `app/character/[id]/edit/form.tsx` |
 
 ---
@@ -37,8 +34,9 @@ npx tsc --noEmit && npm run dev
 
 ## Historial
 
-- **2026-04-21 (V)**: **Lanzadores preparados (PHB cap. 10)**: al guardar desde el wizard, `buildKnownSpells` incluye **todo el repertorio** de clase (conjuros de nv. ≥1 hasta el máximo lanzable) con `prepared` sólo en los elegidos; texto del paso Conjuros actualizado. **Hoja**: `SpellDailyPrep` (client) para cambiar preparados tras descanso largo, con tope `nivel + mod` (vía `nonCantripSpellPicks`). **CA y objetos mágicos**: `computeAc(..., otherAcBonus)`; campo `acOtherBonus` en schema; wizard y edición lo persisten; la CA total en juego sigue siendo `ac` (editable en edición) con nota si `acOtherBonus` ≠ 0.
-- **2026-04-21 (IV)**: `lib/tools.ts` + paso Habilidades + `lib/rules-engine.ts` + aclaración catálogo conjuros nv 3–9.
-- **2026-04-21 (III–I)**: Conjuros nv 2+, grimorio, estilos, HP multi-nivel, etc.
+- **2026-04-21 (IX)**: **Ampliación nv. 2 PHB** en `lib/spells.ts`: Auxilio, Augurio, Llama eterna, Reposo gentil, Sugestión (individual), Oscuridad, Paso brumoso, Agrandar/reducir, Calmar emociones, Calentar metal, Mensajero de los animales, Hoja de llamas, Ráfaga de viento — clases según PHB 5e (Manual del Jugador).
+- **2026-04-21 (VIII)**: Preparados PHB — repertorio completo en ficha + `PATCH` de hidratación.
+- **2026-04-21 (VII)**: PG rolados y `hp.levelUpRolls`.
+- **2026-04-21 (VI–I)**: `asiChoices`, CA, herramientas, etc.
 
 _Actualizar solo “Pendiente” e “Historial” al cerrar trabajo._

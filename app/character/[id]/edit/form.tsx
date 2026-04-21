@@ -2,12 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ABILITIES, ABILITY_LABEL, type Character } from "@/lib/character";
+import { ABILITIES, ABILITY_LABEL, effectiveSpellKnownForCharacter, type Character } from "@/lib/character";
 
 export function EditCharacterForm({ character }: { character: Character }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<Character>(character);
+  const [draft, setDraft] = useState<Character>(() => ({
+    ...character,
+    spells: { ...character.spells, known: effectiveSpellKnownForCharacter(character) },
+  }));
 
   const equipmentText = useMemo(
     () =>

@@ -572,12 +572,6 @@ export function StoryRoom({
     }
   }, [coverImage, generatingCover, sceneHint, story.id, story.summary, story.title]);
 
-  useEffect(() => {
-    if (coverImage) return;
-    if (!openingDone) return;
-    void generateCover();
-  }, [coverImage, openingDone, generateCover]);
-
   function clearScene() {
     setSceneImage(null);
     void persistState({ sceneImage: null });
@@ -601,10 +595,25 @@ export function StoryRoom({
                 ⚔ En combate
               </span>
             )}
+            {!coverImage && (
+              <button
+                type="button"
+                onClick={() => void generateCover()}
+                className="btn-ghost"
+                disabled={generatingCover || generatingImage || combat}
+                title={
+                  combat
+                    ? "El mapa táctico está activo durante el combate"
+                    : "Ilustración de portada para la campaña (solo si la pides)"
+                }
+              >
+                {generatingCover ? "Pintando portada…" : "Generar portada"}
+              </button>
+            )}
             <button
               onClick={generateScene}
               className="btn-ghost"
-              disabled={generatingImage || combat}
+              disabled={generatingImage || generatingCover || combat}
               title={combat ? "El mapa táctico está activo durante el combate" : "Pinta una ilustración de la escena actual"}
             >
               {generatingImage ? "Pintando…" : sceneImage ? "Nueva escena" : "Generar escena"}

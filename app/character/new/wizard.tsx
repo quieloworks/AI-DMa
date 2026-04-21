@@ -25,6 +25,7 @@ import {
   firstLevelSpellPicks,
   maxCastableSpellLevel,
   maxHpAtLevel,
+  maxHpFromLevelRolls,
   pointBuyTotal,
   proficiencyBonus,
   spellSlotsFor,
@@ -40,6 +41,7 @@ import {
   type FightingStyle,
   type RaceBasics,
   type RaceVariant,
+  type AsiSlotChoice,
 } from "@/lib/character";
 import { SPELLS, spellsForClassAtLevel, spellsForClassUpToLevel, type Spell, type SpellClassId } from "@/lib/spells";
 import { FEATS, type Feat } from "@/lib/feats";
@@ -78,10 +80,8 @@ type MoneyMethod = "fixed" | "rolled";
 // - kind "none": slot sin decidir (inválido para avanzar).
 // - kind "asi":   `picks` = [ability] para +2 al mismo atributo, o [a1, a2] distintos para +1 cada uno.
 // - kind "feat":  selecciona un `featId`. Si la dote da +1 a elección de varios atributos, `abilityChoice` lo indica.
-export type AsiChoice =
-  | { kind: "none" }
-  | { kind: "asi"; picks: Ability[] }
-  | { kind: "feat"; featId: string; abilityChoice?: Ability };
+// Los slots resueltos se persisten en `Character.asiChoices` (`AsiSlotChoice`).
+export type AsiChoice = AsiSlotChoice | { kind: "none" };
 
 export function CharacterWizard() {
   const router = useRouter();
@@ -117,6 +117,9 @@ export function CharacterWizard() {
   const [chosenFightingStyles, setChosenFightingStyles] = useState<string[]>([]);
   const [classToolPicks, setClassToolPicks] = useState<string[]>([]);
   const [bgToolPicks, setBgToolPicks] = useState<string[]>([]);
+  /** PHB p. 15: «promedio» fijo del PHB vs tiradas por nivel ≥2. */
+  const [hpGeneration, setHpGeneration] = useState<"average" | "rolled">("average");
+  const [hpLevelRolls, setHpLevelRolls] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
 
   const stepIdx = STEPS.findIndex((s) => s.id === step);
@@ -230,10 +233,15 @@ export function CharacterWizard() {
 
   const conMod = abilityMod(effective.con);
   const hpBonusPerLevel = variant?.hpBonusPerLevel ?? 0;
-  // PHB p. 15 ("Hit Points at Higher Levels"): nivel 1 = máximo del dado + mod CON; niveles
-  // posteriores = promedio del dado (redondeo hacia arriba) + mod CON. Usamos la modalidad
-  // "average" vía maxHpAtLevel y sumamos los rasgos raciales por nivel (p. ej. Enano de las colinas).
-  const maxHp = klass ? maxHpAtLevel(level, klass.hitDie, conMod) + hpBonusPerLevel * level : 0;
+  // PHB p. 15: nivel 1 = máximo del dado + CON; niveles 2+ = promedio PHB o tiradas (`hpLevelRolls`).
+  const maxHp = useMemo(() => {
+    if (!klass) return 0;
+    const racial = hpBonusPerLevel * level;
+    if (hpGeneration === "rolled" && level > 1 && hpLevelRolls.length === level - 1) {
+      return maxHpFromLevelRolls(klass.hitDie, conMod, level, hpLevelRolls) + racial;
+    }
+    return maxHpAtLevel(level, klass.hitDie, conMod) + racial;
+  }, [klass, level, conMod, hpBonusPerLevel, hpGeneration, hpLevelRolls]);
   const prof = proficiencyBonus(level);
 
   const equipmentChoiceComplete = useMemo(() => {
@@ -270,6 +278,21 @@ export function CharacterWizard() {
       return [...prev, ...Array.from({ length: asiSlots - prev.length }, () => ({ kind: "none" } as AsiChoice))];
     });
   }, [asiSlots]);
+
+  useEffect(() => {
+    const n = Math.max(0, level - 1);
+    if (hpGeneration !== "rolled" || n === 0) {
+      setHpLevelRolls([]);
+      return;
+    }
+    const hd = klass?.hitDie ?? 8;
+    const defaultRoll = Math.floor(hd / 2) + 1;
+    setHpLevelRolls((prev) => {
+      const next = prev.slice(0, n);
+      while (next.length < n) next.push(defaultRoll);
+      return next;
+    });
+  }, [level, klass?.hitDie, hpGeneration]);
 
   useEffect(() => {
     if (!klass?.spellcasting) return;
@@ -374,7 +397,15 @@ export function CharacterWizard() {
       fightingStyles: chosenFightingStyles,
       skills: combinedSkills,
       savingThrows: klass.savingThrows,
-      hp: { max: maxHp, current: maxHp, temp: 0, hitDie: klass.hitDie },
+      hp: {
+        max: maxHp,
+        current: maxHp,
+        temp: 0,
+        hitDie: klass.hitDie,
+        ...(hpGeneration === "rolled" && level > 1 && hpLevelRolls.length === level - 1
+          ? { levelUpRolls: [...hpLevelRolls] }
+          : {}),
+      },
       ac,
       acOtherBonus: 0,
       speed: effectiveSpeed,
@@ -436,6 +467,7 @@ export function CharacterWizard() {
         ...chosenFeats,
         ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
       ],
+      asiChoices: asiChoices.filter((c): c is AsiSlotChoice => c.kind !== "none"),
     };
     const res = await fetch("/api/character", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = (await res.json()) as { id: string };
@@ -537,7 +569,16 @@ export function CharacterWizard() {
       const allowed = new Set<string>(fightingStylesForClass(klass.id).map((s) => s.id));
       return chosenFightingStyles.some((sid) => !allowed.has(sid));
     }
-    if (step === "details") return !name.trim();
+    if (step === "details") {
+      if (!name.trim()) return true;
+      if (klass && level > 1 && hpGeneration === "rolled") {
+        if (hpLevelRolls.length !== level - 1) return true;
+        for (const r of hpLevelRolls) {
+          if (r < 1 || r > klass.hitDie) return true;
+        }
+      }
+      return false;
+    }
     return false;
   })();
 
@@ -677,7 +718,7 @@ export function CharacterWizard() {
               setChosenRacialCantrip={setChosenRacialCantrip}
             />
           )}
-          {step === "details" && (
+          {step === "details" && klass && (
             <DetailsStep
               name={name}
               setName={setName}
@@ -687,6 +728,11 @@ export function CharacterWizard() {
               setAlignment={setAlignment}
               level={level}
               setLevel={setLevel}
+              klass={klass}
+              hpGeneration={hpGeneration}
+              setHpGeneration={setHpGeneration}
+              hpLevelRolls={hpLevelRolls}
+              setHpLevelRolls={setHpLevelRolls}
             />
           )}
           {step === "estilo" && klass && (
@@ -1571,6 +1617,11 @@ function DetailsStep({
   setAlignment,
   level,
   setLevel,
+  klass,
+  hpGeneration,
+  setHpGeneration,
+  hpLevelRolls,
+  setHpLevelRolls,
 }: {
   name: string;
   setName: (v: string) => void;
@@ -1580,44 +1631,116 @@ function DetailsStep({
   setAlignment: (v: string) => void;
   level: number;
   setLevel: (v: number) => void;
+  klass: ClassBasics;
+  hpGeneration: "average" | "rolled";
+  setHpGeneration: (m: "average" | "rolled") => void;
+  hpLevelRolls: number[];
+  setHpLevelRolls: Dispatch<SetStateAction<number[]>>;
 }) {
+  const hd = klass.hitDie;
+  function rollOne(idx: number) {
+    const v = Math.floor(Math.random() * hd) + 1;
+    setHpLevelRolls((prev) => {
+      const next = [...prev];
+      next[idx] = v;
+      return next;
+    });
+  }
+  function setRoll(idx: number, raw: string) {
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) return;
+    const clamped = Math.max(1, Math.min(hd, n));
+    setHpLevelRolls((prev) => {
+      const next = [...prev];
+      next[idx] = clamped;
+      return next;
+    });
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <label className="block">
-        <span className="label">Nombre del personaje</span>
-        <input className="input mt-2" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Arannis Soldrake" />
-      </label>
-      <label className="block">
-        <span className="label">Nombre del jugador (real)</span>
-        <input
-          className="input mt-2"
-          value={playerName}
-          onChange={(e) => setPlayerName(e.target.value)}
-          placeholder="Ej: María López"
-        />
-      </label>
-      <label className="block">
-        <span className="label">Nivel</span>
-        <input className="input mt-2" type="number" min={1} max={20} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
-      </label>
-      <label className="block">
-        <span className="label">Alineamiento</span>
-        <select className="input mt-2" value={alignment} onChange={(e) => setAlignment(e.target.value)}>
-          {[
-            "Legal bueno",
-            "Neutral bueno",
-            "Caótico bueno",
-            "Legal neutral",
-            "Neutral",
-            "Caótico neutral",
-            "Legal malvado",
-            "Neutral malvado",
-            "Caótico malvado",
-          ].map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
-      </label>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <label className="block">
+          <span className="label">Nombre del personaje</span>
+          <input className="input mt-2" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Arannis Soldrake" />
+        </label>
+        <label className="block">
+          <span className="label">Nombre del jugador (real)</span>
+          <input
+            className="input mt-2"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            placeholder="Ej: María López"
+          />
+        </label>
+        <label className="block">
+          <span className="label">Nivel</span>
+          <input className="input mt-2" type="number" min={1} max={20} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
+        </label>
+        <label className="block">
+          <span className="label">Alineamiento</span>
+          <select className="input mt-2" value={alignment} onChange={(e) => setAlignment(e.target.value)}>
+            {[
+              "Legal bueno",
+              "Neutral bueno",
+              "Caótico bueno",
+              "Legal neutral",
+              "Neutral",
+              "Caótico neutral",
+              "Legal malvado",
+              "Neutral malvado",
+              "Caótico malvado",
+            ].map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {level > 1 && (
+        <div className="card">
+          <p className="label mb-2">Puntos de golpe (PHB p. 15)</p>
+          <p className="mb-4 text-xs" style={{ color: "var(--color-text-hint)" }}>
+            Nivel 1: máximo del dado de golpe de tu clase (d{hd}) + mod de CON. A partir del nivel 2, cada subida suma una tirada del mismo dado + mod de CON, o el valor fijo de «promedio» del manual.
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={hpGeneration === "average" ? "btn-accent" : "btn-ghost"}
+              onClick={() => setHpGeneration("average")}
+            >
+              Promedio PHB
+            </button>
+            <button type="button" className={hpGeneration === "rolled" ? "btn-accent" : "btn-ghost"} onClick={() => setHpGeneration("rolled")}>
+              Tiradas manuales
+            </button>
+          </div>
+          {hpGeneration === "rolled" && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {hpLevelRolls.map((roll, i) => (
+                <div key={i} className="card flex flex-col gap-2 py-3">
+                  <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    Subida a nivel {i + 2} (d{hd})
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="input w-20 text-center"
+                      min={1}
+                      max={hd}
+                      value={roll}
+                      onChange={(e) => setRoll(i, e.target.value)}
+                    />
+                    <button type="button" className="btn-ghost text-sm" onClick={() => rollOne(i)}>
+                      Tirar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,19 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
-import { ABILITIES, ABILITY_LABEL, SKILLS, abilityMod, CharacterSchema, effectiveAbility, initiative, proficiencyBonus, savingThrow, skillBonus } from "@/lib/character";
+import {
+  ABILITIES,
+  ABILITY_LABEL,
+  SKILLS,
+  abilityMod,
+  CharacterSchema,
+  effectiveAbility,
+  effectiveSpellKnownForCharacter,
+  initiative,
+  proficiencyBonus,
+  savingThrow,
+  skillBonus,
+} from "@/lib/character";
 import { findFeat } from "@/lib/feats";
 import { SpellDailyPrep } from "./SpellDailyPrep";
 
@@ -20,6 +32,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
   const parsed = CharacterSchema.safeParse({ ...JSON.parse(row.data_json), id });
   if (!parsed.success) return <Shell><p>Hoja inválida.</p></Shell>;
   const ch = parsed.data;
+  const spellRows = effectiveSpellKnownForCharacter(ch);
 
   return (
     <Shell active="character">
@@ -78,7 +91,14 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         <div className="card">
           <p className="label mb-3">Vitales</p>
           <div className="grid grid-cols-2 gap-3">
-            <Stat label="HP" value={`${ch.hp.current}/${ch.hp.max}`} />
+            <div>
+              <Stat label="HP" value={`${ch.hp.current}/${ch.hp.max}`} />
+              {ch.hp.levelUpRolls && ch.hp.levelUpRolls.length > 0 && (
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                  PG por tiradas (niv. 2+): {ch.hp.levelUpRolls.join(", ")} (d{ch.hp.hitDie})
+                </p>
+              )}
+            </div>
             <div>
               <Stat label="CA" value={ch.ac} />
               {(ch.acOtherBonus ?? 0) !== 0 && (
@@ -112,7 +132,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
-      {(ch.spells.known.length > 0 || Object.keys(ch.spells.slots).length > 0) && (
+      {(spellRows.length > 0 || Object.keys(ch.spells.slots).length > 0) && (
         <div className="mt-6 card">
           <SpellDailyPrep character={ch} />
           <div className="mb-3 flex items-center justify-between">
@@ -133,7 +153,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             </div>
           )}
           <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
-            {ch.spells.known.map((s, i) => (
+            {spellRows.map((s, i) => (
               <li key={i}>
                 <span style={{ color: "var(--color-accent)" }}>
                   {s.level === 0 ? "Truco" : `Nv ${s.level}`}
@@ -142,6 +162,35 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {ch.asiChoices.length > 0 && (
+        <div className="mt-6 card">
+          <p className="label mb-3">Mejoras de nivel (PHB)</p>
+          <ol className="list-decimal space-y-2 pl-5 text-sm">
+            {ch.asiChoices.map((c, i) => (
+              <li key={i}>
+                {c.kind === "asi" ? (
+                  <>
+                    <strong>ASI</strong>:{" "}
+                    {c.picks.length === 1
+                      ? `+2 a ${ABILITY_LABEL[c.picks[0]!]}`
+                      : `+1 a ${ABILITY_LABEL[c.picks[0]!]}, +1 a ${ABILITY_LABEL[c.picks[1]!]}`}
+                  </>
+                ) : (
+                  <>
+                    <strong>Dote</strong>: {findFeat(c.featId)?.name ?? c.featId}
+                    {c.abilityChoice && (
+                      <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                        (atributo: {ABILITY_LABEL[c.abilityChoice]})
+                      </span>
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 

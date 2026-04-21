@@ -1,22 +1,52 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CLASSES,
   type Character,
   effectiveAbility,
+  effectiveSpellKnownForCharacter,
   nonCantripSpellPicks,
   type Ability,
 } from "@/lib/character";
 
 type Props = { character: Character };
 
+function withEffectiveKnown(c: Character): Character {
+  return { ...c, spells: { ...c.spells, known: effectiveSpellKnownForCharacter(c) } };
+}
+
 /** PHB: lanzadores con conjuros preparados pueden cambiar el subconjunto tras un descanso largo. */
 export function SpellDailyPrep({ character: initial }: Props) {
   const router = useRouter();
-  const [char, setChar] = useState(initial);
+  const [char, setChar] = useState<Character>(() => withEffectiveKnown(initial));
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChar(withEffectiveKnown(initial));
+  }, [initial]);
+
+  useEffect(() => {
+    const expanded = effectiveSpellKnownForCharacter(initial);
+    if (expanded.length <= initial.spells.known.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/character/${initial.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spells: { ...initial.spells, known: expanded } }),
+        });
+        if (!cancelled && res.ok) router.refresh();
+      } catch {
+        /* ignorar; la UI ya muestra la lista fusionada */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initial.id, initial.class, initial.level, initial.spells.known.length, router]);
 
   const meta = useMemo(() => {
     const klass = CLASSES.find((c) => c.id === char.class);
@@ -70,8 +100,8 @@ export function SpellDailyPrep({ character: initial }: Props) {
     <div className="mb-4 rounded-md p-3" style={{ background: "var(--color-bg-tertiary)", border: "0.5px solid var(--color-border)" }}>
       <p className="label mb-1">Preparación diaria</p>
       <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-        Tras un descanso largo (PHB), elige hasta {maxPrepared} conjuros de nivel ≥1 preparados entre tu repertorio de clase. Los trucos no cuentan.
-        {" "}Ahora: {char.spells.known.filter((s) => s.level >= 1 && s.prepared).length}/{maxPrepared}.
+        Tras un descanso largo (PHB), elige hasta {maxPrepared} conjuros de nivel ≥1 preparados entre tu repertorio de clase. Los trucos no cuentan.{" "}
+        Ahora: {char.spells.known.filter((s) => s.level >= 1 && s.prepared).length}/{maxPrepared}.
       </p>
       {maxPrepared === 0 ? (
         <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>

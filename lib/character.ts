@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SpellClassId } from "./spells";
+import { mergePreparedCasterKnownWithCatalog, type SpellClassId } from "./spells";
 
 export const ABILITIES = ["fue", "des", "con", "int", "sab", "car"] as const;
 export type Ability = (typeof ABILITIES)[number];
@@ -33,6 +33,20 @@ export const SKILLS: Record<string, { label: string; ability: Ability }> = {
   perspicacia: { label: "Perspicacia", ability: "sab" },
   tratoConAnimales: { label: "Trato con animales", ability: "sab" },
 };
+
+/** PHB p. 12 / p. 15: resultado de un slot de ASI o dote (sin el marcador UI `none`). */
+export const AsiSlotChoiceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("asi"),
+    picks: z.array(z.enum(ABILITIES)).min(1).max(2),
+  }),
+  z.object({
+    kind: z.literal("feat"),
+    featId: z.string().min(1),
+    abilityChoice: z.enum(ABILITIES).optional(),
+  }),
+]);
+export type AsiSlotChoice = z.infer<typeof AsiSlotChoiceSchema>;
 
 export const CharacterSchema = z.object({
   id: z.string(),
@@ -70,6 +84,8 @@ export const CharacterSchema = z.object({
     current: z.number().int(),
     temp: z.number().int().default(0),
     hitDie: z.number().int(),
+    /** PHB p. 15: tirada del dado de golpe por cada nivel ≥2 (sin mod CON en el array; el máximo usa CON por nivel). */
+    levelUpRolls: z.array(z.number().int().min(1)).optional(),
   }),
   ac: z.number().int(),
   /** PHB: anillo de protección, armadura/escudo mágico (+X), etc. Se suma al resultado de `computeAc`. */
@@ -97,6 +113,8 @@ export const CharacterSchema = z.object({
     .default({ known: [], slots: {} }),
   features: z.array(z.object({ name: z.string(), source: z.string(), text: z.string() })).default([]),
   feats: z.array(z.string()).default([]),
+  /** PHB: un elemento por slot de mejora de nivel (ASI +2, ASI +1/+1, o dote con opcional atributo). */
+  asiChoices: z.array(AsiSlotChoiceSchema).default([]),
   // Estilos de combate (guerrero lvl 1, paladín/explorador lvl 2). Se guardan como
   // ids de FIGHTING_STYLES para que computeAc pueda aplicar "defensa" y futuras mejoras
   // puedan inspeccionarlos (dueling, archery, etc.) sin tocar la ficha.
@@ -1214,6 +1232,20 @@ export function maxHpAtLevel(level: number, hitDie: number, conMod: number): num
   return maxHpAtLevel1(hitDie, conMod) + (level - 1) * (avgExtra + conMod);
 }
 
+/**
+ * PHB p. 15: nivel 1 = máximo del dado + CON; cada nivel posterior suma (tirada del dado) + mod CON.
+ * `rolls` debe tener longitud `nivel − 1` con valores en `[1, hitDie]`.
+ */
+export function maxHpFromLevelRolls(hitDie: number, conMod: number, level: number, rolls: number[]): number {
+  if (level <= 1) return maxHpAtLevel1(hitDie, conMod);
+  if (rolls.length !== level - 1) return maxHpAtLevel(level, hitDie, conMod);
+  for (const r of rolls) {
+    if (r < 1 || r > hitDie) return maxHpAtLevel(level, hitDie, conMod);
+  }
+  const sumDice = rolls.reduce((a, b) => a + b, 0);
+  return maxHpAtLevel1(hitDie, conMod) + sumDice + (level - 1) * conMod;
+}
+
 export const SPELL_SLOTS_FULL_CASTER: Record<number, number[]> = {
   1: [2],
   2: [3],
@@ -1317,6 +1349,16 @@ export function firstLevelSpellPicks(
   classId: string,
 ): number {
   return nonCantripSpellPicks(spellcasting, classId, level, abilityScore);
+}
+
+/** Lista efectiva de conjuros en ficha (repertorio PHB completo para preparados). */
+export function effectiveSpellKnownForCharacter(character: Character): Character["spells"]["known"] {
+  const klass = CLASSES.find((c) => c.id === character.class);
+  if (!klass?.spellcasting || klass.spellcasting.preparation !== "prepared") {
+    return character.spells.known;
+  }
+  const maxLv = maxCastableSpellLevel(klass.spellcasting.caster, character.level);
+  return mergePreparedCasterKnownWithCatalog(klass.id as SpellClassId, maxLv, character.spells.known);
 }
 
 // Número de conjuros que el mago puede preparar al crear ficha (PHB p. 114).

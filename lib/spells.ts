@@ -160,6 +160,21 @@ export const SPELLS: Spell[] = [
   { id: "proteccion-contra-veneno", name: "Protección contra el veneno", level: 2, school: "abjuracion", classes: ["clerigo", "druida", "paladin", "explorador"], concentration: true, description: "Una criatura tocada tiene resistencia al daño por veneno y ventaja contra venenos durante 1 hora." },
   { id: "arma-magica", name: "Arma mágica", level: 2, school: "transmutacion", classes: ["paladin"], concentration: true, description: "Un arma tocada cuenta como mágica y tiene bonificador +1 al ataque y daño durante 1 hora." },
 
+  // --- Nivel 2 PHB (huecos frecuentes en mesa; nombres alineados con Manual del Jugador ES) ---
+  { id: "auxilio", name: "Auxilio", level: 2, school: "abjuracion", classes: ["clerigo", "paladin"], concentration: true, description: "Hasta 3 criaturas tocadas aumentan su máximo y sus PG actuales en 5 cada una durante 8 horas." },
+  { id: "augurio", name: "Augurio", level: 2, school: "adivinacion", classes: ["clerigo"], ritual: true, description: "Aprendes si un plan que emprenderás en los próximos 30 min será bueno o malo según lecturas de entrañas, pájaros, etc." },
+  { id: "llama-eterna", name: "Llama eterna", level: 2, school: "evocacion", classes: ["clerigo", "mago"], description: "Un objeto tocado arde sin consumirse ni calentarse, emitiendo luz equivalente a una antorcha hasta que se disipe." },
+  { id: "reposo-gentil", name: "Reposo gentil", level: 2, school: "nigromancia", classes: ["clerigo", "mago"], ritual: true, description: "Proteges un cadáver tocado de ser no-muerto y retrasa su putrefacción durante 10 días." },
+  { id: "sugestion", name: "Sugestión", level: 2, school: "encantamiento", classes: ["bardo", "hechicero", "mago"], concentration: true, description: "Una criatura que oye tu mensaje salva SAB o sigue un curso de acción razonable durante 8 horas." },
+  { id: "oscuridad", name: "Oscuridad", level: 2, school: "evocacion", classes: ["hechicero", "brujo", "mago"], concentration: true, description: "Esfera de 4,5m de radio de oscuridad mágica impenetrable a la visión normal y a la luz no mágica durante 10 minutos." },
+  { id: "paso-brumoso", name: "Paso brumoso", level: 2, school: "conjuracion", classes: ["hechicero", "brujo", "mago"], description: "Acción adicional: te teletransportas hasta 9m a un lugar no ocupado que puedas ver." },
+  { id: "agrandar-reducir", name: "Agrandar/reducir", level: 2, school: "transmutacion", classes: ["bardo", "druida", "hechicero", "mago"], concentration: true, description: "Una criatura u objeto que ves crece o encoge durante 1 minuto (ventajas o desventajas en combate y porte según el PHB)." },
+  { id: "calmar-emociones", name: "Calmar emociones", level: 2, school: "encantamiento", classes: ["bardo", "clerigo"], concentration: true, description: "Humanoides en esfera de 6m salvan CAR o quedan indiferentes hacia criaturas elegidas; puedes suprimir ventaja por miedo o enojo." },
+  { id: "calentar-metal", name: "Calentar metal", level: 2, school: "transmutacion", classes: ["bardo", "druida"], concentration: true, description: "Objeto metálico que puedas ver se calienta; quien lo lleve o toque recibe daño de fuego y penalizaciones hasta soltarlo." },
+  { id: "mensajero-animales", name: "Mensajero de los animales", level: 2, school: "encantamiento", classes: ["bardo", "druida", "explorador"], ritual: true, description: "Una bestia diminuta lleva tu mensaje a un lugar que conozcas y vuelve con una respuesta corta en 24 horas." },
+  { id: "hoja-llamas", name: "Hoja de llamas", level: 2, school: "evocacion", classes: ["druida"], concentration: true, description: "Invocas una hoja de fuego en tu mano libre; ataque de conjuro cuerpo a cuerpo que hace daño de fuego." },
+  { id: "rafaga-viento", name: "Ráfaga de viento", level: 2, school: "evocacion", classes: ["druida", "explorador", "mago"], concentration: true, description: "Línea de 18m×3m de viento fuerte; criaturas salvan FUE o retroceden y quedan prono si son voladoras." },
+
   { id: "hablar-muertos", name: "Hablar con los muertos", level: 3, school: "nigromancia", classes: ["bardo", "clerigo"], description: "Devuelves la voz a un cadáver durante 10 min para responder 5 preguntas (sólo hasta 10 días de muerto)." },
   { id: "disipar-magia", name: "Disipar magia", level: 3, school: "abjuracion", classes: ["bardo", "clerigo", "druida", "paladin", "hechicero", "brujo", "mago"], description: "Fin de cualquier conjuro de nivel ≤ 3 en la criatura/objeto/efecto tocado. A niveles superiores aumenta el máximo automático." },
 
@@ -188,6 +203,16 @@ export const SPELLS: Spell[] = [
   { id: "piromancia", name: "Pirotecnia", level: 3, school: "transmutacion", classes: ["bardo", "brujo", "hechicero", "mago"], description: "Efectos de humo, chispas o una débil explosión en cubo de 3m (ruido, luz o humo)." },
   { id: "palabra-recuperadora", name: "Palabra de recuperación", level: 3, school: "evocacion", classes: ["clerigo"], description: "Un humanoide a 9m recupera PG y puede terminar encantamiento, asustado o encantado." },
   { id: "glifo-proteccion", name: "Glifo de custodia", level: 3, school: "abjuracion", classes: ["bardo", "clerigo", "mago"], description: "Grabas una trampa mágica en objeto o superficie que puede explotar o lanzar otro conjuro si se cumple una condición." },
+
+  // --- Nivel 3 PHB (huecos frecuentes) ---
+  { id: "acelerar", name: "Acelerar", level: 3, school: "transmutacion", classes: ["bardo", "hechicero", "mago"], concentration: true, description: "Una criatura voluntaria gana acción adicional, +2 a la CA y ventaja en salvaciones de DES; al terminar el conjuro sufre letargo (PHB)." },
+  { id: "lentitud", name: "Lentitud", level: 3, school: "transmutacion", classes: ["hechicero", "mago"], concentration: true, description: "Cubo de 12m; criaturas que elijas salvan SAB o quedan lentas: sólo acción o acción adicional por turno, −2 a la CA y DES, no reacciones." },
+  { id: "crear-comida-agua", name: "Crear comida y agua", level: 3, school: "conjuracion", classes: ["clerigo", "paladin"], description: "Creas comida y agua que nutren hasta quince humanoides o cinco monturas durante 24 horas." },
+  { id: "fingir-muerte", name: "Fingir muerte", level: 3, school: "nigromancia", classes: ["bardo", "clerigo", "mago"], ritual: true, description: "Una criatura tocada queda indetectable como viviente para magia y sensibles; resiste daño salvo críticos durante 1 hora." },
+  { id: "palabra-curacion-masa", name: "Palabra de curación en masa", level: 3, school: "evocacion", classes: ["bardo", "clerigo"], description: "Acción adicional: hasta 6 criaturas que elijas a 18m recuperan 1d4 + mod de lanzamiento PG cada una." },
+  { id: "lenguas", name: "Lenguas", level: 3, school: "adivinacion", classes: ["bardo", "brujo", "hechicero", "mago"], description: "Una criatura tocada entiende cualquier idioma hablado que oiga durante 1 hora; al hablar, otros oyen su mensaje en un idioma que entiendan." },
+  { id: "muro-viento", name: "Muro de viento", level: 3, school: "evocacion", classes: ["druida", "explorador", "mago"], concentration: true, description: "Muro de viento fuerte de hasta 15m de largo y 3m de alto; proyectiles físicos pequeños no lo atraviesan; niebla y gases se dispersan." },
+  { id: "clarividencia", name: "Clarividencia", level: 3, school: "adivinacion", classes: ["bardo", "clerigo", "hechicero", "mago"], concentration: true, description: "Creas un sensor invisible en un lugar familiar a 1,5 km; ves u oyes como si estuvieras allí (elige al lanzar)." },
 
   // ---------- Nivel 4 ----------
   { id: "polimorfar", name: "Polimorfar", level: 4, school: "transmutacion", classes: ["bardo", "druida", "hechicero", "mago"], concentration: true, description: "Transformas una criatura voluntaria en bestia de nivel ≤ su ND durante hasta 1 hora." },
@@ -281,4 +306,49 @@ export function spellsForClassUpToLevel(classId: SpellClassId, maxSpellLevel: nu
 export function findSpellByName(name: string): Spell | undefined {
   const n = name.trim().toLowerCase();
   return SPELLS.find((s) => s.name.toLowerCase() === n || s.id === n);
+}
+
+export type SpellKnownRow = { name: string; level: number; prepared: boolean };
+
+/**
+ * PHB (clérigo / druida / paladín): preparas desde la lista completa de conjuros de tu clase
+ * hasta el nivel de ranura que puedes usar. Personajes antiguos pueden tener solo un subconjunto
+ * en `known`; se fusiona con `SPELLS` conservando el flag `prepared` por nombre+nivel.
+ */
+export function mergePreparedCasterKnownWithCatalog(
+  classId: SpellClassId,
+  maxSpellLevel: number,
+  known: SpellKnownRow[],
+): SpellKnownRow[] {
+  const cap = Math.min(9, Math.max(0, maxSpellLevel));
+  const full = spellsForClassUpToLevel(classId, cap);
+  const sortKnown = (rows: SpellKnownRow[]) =>
+    [...rows].sort((a, b) => (a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, "es")));
+  // Sin entradas en catálogo a este techo (p. ej. paladín nv. 1 sin trucos de lista): no fusionar.
+  if (full.length === 0) return sortKnown(known);
+  const keyOf = (name: string, level: number) => `${level}:${name.trim().toLowerCase()}`;
+  const preparedByKey = new Map<string, boolean>();
+  for (const row of known) {
+    const spell = findSpellByName(row.name);
+    const key = spell ? keyOf(spell.name, spell.level) : keyOf(row.name, row.level);
+    preparedByKey.set(key, row.prepared);
+  }
+  const out: SpellKnownRow[] = [];
+  for (const s of full) {
+    const key = keyOf(s.name, s.level);
+    const prev = preparedByKey.get(key);
+    const prepared = s.level === 0 ? true : prev ?? false;
+    out.push({ name: s.name, level: s.level, prepared });
+  }
+  for (const row of known) {
+    const spell = findSpellByName(row.name);
+    const inClassCatalog =
+      spell != null &&
+      spell.classes.includes(classId) &&
+      spell.level <= cap &&
+      spell.name.trim().toLowerCase() === row.name.trim().toLowerCase();
+    if (inClassCatalog) continue;
+    out.push({ ...row });
+  }
+  return sortKnown(out);
 }
