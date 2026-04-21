@@ -190,7 +190,9 @@ function renderBattleMapSummary(snap: SessionSnapshot): string {
   });
   const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} más` : "";
   const tailO = (bm.obstacles?.length ?? 0) > 20 ? ` …+${(bm.obstacles?.length ?? 0) - 20}` : "";
-  return [head, `Participantes: ${parts.join("; ")}${tailP}`, obs.length ? `Obstáculos: ${obs.join("; ")}${tailO}` : ""]
+  const narr =
+    "En combate, la <narrativa> debe reflejar distancias (celdas/pies), línea de visión, cobertura y terreno según estas posiciones y obstáculos (PHB/DMG).";
+  return [head, `Participantes: ${parts.join("; ")}${tailP}`, obs.length ? `Obstáculos: ${obs.join("; ")}${tailO}` : "", narr]
     .filter(Boolean)
     .join("\n");
 }
@@ -265,12 +267,14 @@ const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores
 
 const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
 - INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
-- Hasta tener initiative[] completo para todos los del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
+- Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
+- Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
 - Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
 
 const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
 - Continuidad del mapa: MAPEO TÁCTICO arriba es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
 - Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, narra y actualiza JSON.
+- Narrativa atada al mapa (obligatorio en combate): en <narrativa> ancla cada golpe, conjuro u observación en la geometría del MAPEO TÁCTICO. Di cuán cerca o lejos están los bandos (celdas y/o pies usando cellFeet del grid). Si una línea entre atacante y blanco cruza muro, tronco denso, esquina, puerta entreabierta, humo espeso, etc., narra bloqueo o limitación de visión y aplica reglas 5E (línea de efecto, objetivo a ciegas, cobertura media/tres cuartos/total según aplique). Menciona arbustos, zarzas, agua (poca o corriente), hielo, escaleras, escombros o estructuras cuando expliquen alcance cuerpo a cuerpo a distancia, terreno difícil, o ventaja posicional; si la acción declarada contradice el mapa (demasiado lejos, sin LoS, bloqueo total), narra el impedimento y no pidas tirada hasta que el jugador ajuste o se mueva.
 - Orden: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
 - Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
 - Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
@@ -300,7 +304,7 @@ const FORMAT = `SALIDA (español): solo dos bloques.
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}]}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{player_id,expression,label,dc?}], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico: wall|tree|bush|water|stream|rubble|door|… para cobertura/LOS/terreno en narrativa)}, combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{player_id,expression,label,dc?}], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
 player_id en tiradas: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
