@@ -156,14 +156,18 @@ const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN DEL GRUPO (obligatorio cada turno):
 - Haz que las consecuencias sean palpables: refleja estado físico, repercusiones sociales, pistas perdidas o ganadas.`;
 
 const COMBAT_DIRECTIVES = `MECÁNICAS DE COMBATE (D&D 5E):
-- Si se inicia combate, declara "COMBATE INICIA" en la narrativa, pide TIRADAS DE INICIATIVA (1d20+DEX) a todos los involucrados y devuelve el orden propuesto en "actions.initiative".
+- Si se inicia combate, declara "COMBATE INICIA" en la narrativa, pon "combat": true y llena "battle_map" completo (grid, participants con x/y en celdas, obstáculos). Pide TIRADAS DE INICIATIVA (1d20+DEX) y devuelve el orden propuesto en "initiative".
+- Mientras "combat" sea true, actualiza "battle_map" CADA TURNO con las posiciones nuevas de cada participante (x, y en celdas de ${"`cellFeet`"} pies cada una, típicamente 5). Incluye a TODOS los que sigan en escena — jugadores, aliados, enemigos. No omitas a nadie que siga vivo.
+- Respeta la escala: 1 celda = 5 pies. La velocidad base (30 pies) equivale a 6 celdas por turno. Describe distancias coherentes con el mapa.
+- Coloca obstáculos relevantes (muros, cobertura, fuego, agua, muebles) en "battle_map.obstacles" con x, y, w, h (rectángulos en celdas). Mantén la lista estable entre turnos salvo que algo cambie (p. ej. un muro derribado).
+- Cuando el combate termine (enemigos muertos/rendidos/huidos o tregua), pon "combat": false y "combat_end": true en el mismo turno. Ya no hace falta seguir enviando battle_map después.
 - Respeta el orden de iniciativa: 1 turno por ronda = 1 acción + 1 acción bonus (si aplica) + 1 reacción (fuera de turno) + movimiento igual a velocidad.
 - Ataques: solicita tirada de ataque (d20 + mod + proficiencia) vs CA del objetivo; si impacta, pide tirada de daño con el dado del arma/conjuro.
 - Salvaciones: declara la CD y qué atributo (FUE/DES/CON/INT/SAB/CAR). Pide "1d20+mod".
 - Hechizos con slot: menciona nivel del hechizo, componentes, concentración si aplica.
-- Actualiza HP vía "hp_changes" cuando un ataque conecte o un efecto aplique.
-- Condiciones (envenenado, derribado, etc.) van en "status_effects" con "add":true/false.
-- Si alguien cae a 0 HP: pide salvaciones de muerte cada turno (1d20, 10+ = éxito).`;
+- Actualiza HP vía "hp_changes" cuando un ataque conecte o un efecto aplique. Refleja esos HP también en battle_map.participants[].hp.
+- Condiciones (envenenado, derribado, etc.) van en "status_effects" con "add":true/false y se pueden reflejar en battle_map.participants[].status.
+- Si alguien cae a 0 HP: pide salvaciones de muerte cada turno (1d20, 10+ = éxito). Mantén al personaje en el mapa como "inconsciente" en status hasta que se decida su suerte.`;
 
 const MECHANICAL_DIRECTIVES = `MECÁNICAS FUERA DE COMBATE:
 - Para acciones con incertidumbre solicita la tirada correspondiente con su CD (Sigilo vs Percepción pasiva, Persuasión CD 15, Atletismo para escalar, etc.).
@@ -194,6 +198,17 @@ SIEMPRE cierra con una invitación clara a uno o más jugadores para que actúen
   "scene": "descripción breve de la escena actual",
   "map": { "hint": "bosque|mazmorra|taberna|camino|ciudad|castillo|subterraneo|costa|ninguno" },
   "combat": false,
+  "battle_map": {
+    "terrain": "bosque|mazmorra|taberna|camino|ciudad|castillo|subterraneo|costa|ninguno",
+    "grid": { "cols": 20, "rows": 12, "cellFeet": 5 },
+    "participants": [
+      { "id": "id_jugador|npc:goblin-a", "name": "Nombre", "kind": "player|ally|enemy|neutral", "x": 4, "y": 6, "hp": {"current": 11, "max": 11}, "status": ["oculto"] }
+    ],
+    "obstacles": [
+      { "x": 8, "y": 4, "w": 1, "h": 3, "kind": "wall|rock|tree|water|door|fire|cover|table|pillar" }
+    ]
+  },
+  "combat_end": false,
   "initiative": [ {"player_id": "id|npc:goblin-a", "value": 17} ],
   "dice_requests": [
     {"player_id": "id|all", "expression": "1d20+3", "label": "Percepción pasiva vs 12", "dc": 12}

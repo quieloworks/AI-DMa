@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SpellClassId } from "./spells";
 
 export const ABILITIES = ["fue", "des", "con", "int", "sab", "car"] as const;
 export type Ability = (typeof ABILITIES)[number];
@@ -146,6 +147,73 @@ export type EquipmentItem = { name: string; qty: number; note?: string };
 export type EquipmentOption = { id: string; label: string; items: EquipmentItem[] };
 export type EquipmentChoice = { id: string; label: string; options: EquipmentOption[] };
 
+export type ArmorKind = "light" | "medium" | "heavy" | "shield";
+export type ArmorEntry = {
+  name: string;
+  kind: ArmorKind;
+  baseAc: number;
+  maxDex?: number;
+  stealthDisadvantage?: boolean;
+};
+
+// PHB pág. 145 ("Armor" table). Valores canónicos.
+export const ARMORS: ArmorEntry[] = [
+  { name: "Armadura acolchada", kind: "light", baseAc: 11, stealthDisadvantage: true },
+  { name: "Armadura de cuero", kind: "light", baseAc: 11 },
+  { name: "Armadura de cuero tachonado", kind: "light", baseAc: 12 },
+  { name: "Piel", kind: "medium", baseAc: 12, maxDex: 2 },
+  { name: "Camisote de mallas", kind: "medium", baseAc: 13, maxDex: 2, stealthDisadvantage: true },
+  { name: "Armadura de escamas", kind: "medium", baseAc: 14, maxDex: 2, stealthDisadvantage: true },
+  { name: "Coraza", kind: "medium", baseAc: 14, maxDex: 2 },
+  { name: "Semiplaca", kind: "medium", baseAc: 15, maxDex: 2, stealthDisadvantage: true },
+  { name: "Anillada", kind: "heavy", baseAc: 14, maxDex: 0, stealthDisadvantage: true },
+  { name: "Cota de malla", kind: "heavy", baseAc: 16, maxDex: 0, stealthDisadvantage: true },
+  { name: "Coselete", kind: "heavy", baseAc: 17, maxDex: 0, stealthDisadvantage: true },
+  { name: "Placas", kind: "heavy", baseAc: 18, maxDex: 0, stealthDisadvantage: true },
+  { name: "Escudo", kind: "shield", baseAc: 2 },
+  { name: "Escudo de madera", kind: "shield", baseAc: 2 },
+];
+
+export function findArmor(name: string): ArmorEntry | undefined {
+  const n = name.trim().toLowerCase();
+  return ARMORS.find((a) => a.name.toLowerCase() === n);
+}
+
+export function computeAc(params: {
+  equipment: EquipmentItem[];
+  abilityScores: Record<Ability, number>;
+  racialBonus?: Partial<Record<Ability, number>>;
+  klassId?: string;
+}): number {
+  const { equipment, abilityScores, racialBonus = {}, klassId } = params;
+  const score = (a: Ability) => (abilityScores[a] ?? 10) + (racialBonus[a] ?? 0);
+  const dexMod = abilityMod(score("des"));
+  const conMod = abilityMod(score("con"));
+  const wisMod = abilityMod(score("sab"));
+
+  let body: ArmorEntry | undefined;
+  let hasShield = false;
+  for (const it of equipment) {
+    const e = findArmor(it.name);
+    if (!e) continue;
+    if (e.kind === "shield") {
+      hasShield = true;
+    } else if (!body || e.baseAc > body.baseAc) {
+      body = e;
+    }
+  }
+
+  const shieldBonus = hasShield ? 2 : 0;
+  if (body) {
+    const dexContribution = body.maxDex !== undefined ? Math.min(dexMod, body.maxDex) : dexMod;
+    return body.baseAc + dexContribution + shieldBonus;
+  }
+  // Sin armadura: considerar Unarmored Defense del bárbaro (PHB p.48) y monje (PHB p.79).
+  if (klassId === "barbaro") return 10 + dexMod + conMod + shieldBonus;
+  if (klassId === "monje" && !hasShield) return 10 + dexMod + wisMod;
+  return 10 + dexMod + shieldBonus;
+}
+
 export type ClassBasics = {
   id: string;
   label: string;
@@ -155,7 +223,20 @@ export type ClassBasics = {
   armorProficiencies: string[];
   weaponProficiencies: string[];
   toolProficiencies?: string[];
-  spellcasting?: { ability: Ability; caster: "full" | "half" | "third" | "pact" };
+  spellcasting?: {
+    ability: Ability;
+    caster: "full" | "half" | "third" | "pact";
+    // Conteos a nivel 1 (PHB cap. 3). Si una clase arranca sin trucos/conjuros (paladín, explorador)
+    // deja los conteos en 0 para que el wizard omita el paso.
+    cantripsKnown?: number;
+    // Para lanzadores "conocidos" (bardo, hechicero, brujo): número fijo de conjuros de nivel 1.
+    spellsKnown?: number;
+    // Para lanzadores "preparados" (clérigo, druida, mago, paladín): el número de conjuros
+    // preparados equivale a `level + mod(ability)` con un mínimo de 1.
+    preparation?: "known" | "prepared" | "spellbook";
+    // Conjuros que un mago copia a su libro al crear el personaje (PHB p. 114).
+    spellbookCount?: number;
+  };
   skillChoices: { count: number; from: string[] };
   startingEquipmentFixed: EquipmentItem[];
   startingEquipmentChoices: EquipmentChoice[];
@@ -267,7 +348,7 @@ export const CLASSES: ClassBasics[] = [
     skillChoices: { count: 2, from: BARBARIAN_SKILLS },
     startingEquipmentFixed: [
       { name: "Jabalina", qty: 4 },
-      { name: "Paquete de aventurero", qty: 1 },
+      ...PACK_EXPLORER,
     ],
     startingEquipmentChoices: [
       {
@@ -298,7 +379,7 @@ export const CLASSES: ClassBasics[] = [
     armorProficiencies: ["Armadura ligera"],
     weaponProficiencies: ["Armas sencillas", "Ballestas de mano", "Espadas largas", "Estoques", "Espadas cortas"],
     toolProficiencies: ["Tres instrumentos musicales a elección"],
-    spellcasting: { ability: "car", caster: "full" },
+    spellcasting: { ability: "car", caster: "full", cantripsKnown: 2, spellsKnown: 4, preparation: "known" },
     skillChoices: { count: 3, from: ANY_SKILL },
     startingEquipmentFixed: [
       { name: "Armadura de cuero", qty: 1 },
@@ -341,7 +422,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["sab", "car"],
     armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
     weaponProficiencies: ["Armas sencillas"],
-    spellcasting: { ability: "sab", caster: "full" },
+    spellcasting: { ability: "sab", caster: "full", cantripsKnown: 3, preparation: "prepared" },
     skillChoices: { count: 2, from: CLERIC_SKILLS },
     startingEquipmentFixed: [
       { name: "Escudo", qty: 1 },
@@ -392,7 +473,8 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["int", "sab"],
     armorProficiencies: ["Armadura ligera (no metálica)", "Armadura media (no metálica)", "Escudos (no metálicos)"],
     weaponProficiencies: ["Garrotes", "Dagas", "Dardos", "Jabalinas", "Mazas", "Bastones", "Cimitarras", "Hoces", "Hondas", "Lanzas"],
-    spellcasting: { ability: "sab", caster: "full" },
+    toolProficiencies: ["Equipo de herbolario"],
+    spellcasting: { ability: "sab", caster: "full", cantripsKnown: 2, preparation: "prepared" },
     skillChoices: { count: 2, from: DRUID_SKILLS },
     startingEquipmentFixed: [
       { name: "Armadura de cuero", qty: 1 },
@@ -473,6 +555,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["fue", "des"],
     armorProficiencies: [],
     weaponProficiencies: ["Armas sencillas", "Espadas cortas"],
+    toolProficiencies: ["Un tipo de herramientas de artesano o un instrumento musical a elección"],
     skillChoices: { count: 2, from: MONK_SKILLS },
     startingEquipmentFixed: [{ name: "Dardo", qty: 10 }],
     startingEquipmentChoices: [
@@ -503,7 +586,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["sab", "car"],
     armorProficiencies: ["Todas las armaduras", "Escudos"],
     weaponProficiencies: ["Armas sencillas", "Armas marciales"],
-    spellcasting: { ability: "car", caster: "half" },
+    spellcasting: { ability: "car", caster: "half", cantripsKnown: 0 },
     skillChoices: { count: 2, from: PALADIN_SKILLS },
     startingEquipmentFixed: [
       { name: "Cota de malla", qty: 1 },
@@ -545,7 +628,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["fue", "des"],
     armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
     weaponProficiencies: ["Armas sencillas", "Armas marciales"],
-    spellcasting: { ability: "sab", caster: "half" },
+    spellcasting: { ability: "sab", caster: "half", cantripsKnown: 0 },
     skillChoices: { count: 3, from: RANGER_SKILLS },
     startingEquipmentFixed: [
       { name: "Arco largo", qty: 1 },
@@ -631,7 +714,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["con", "car"],
     armorProficiencies: [],
     weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"],
-    spellcasting: { ability: "car", caster: "full" },
+    spellcasting: { ability: "car", caster: "full", cantripsKnown: 4, spellsKnown: 2, preparation: "known" },
     skillChoices: { count: 2, from: SORCERER_SKILLS },
     startingEquipmentFixed: [{ name: "Daga", qty: 2 }],
     startingEquipmentChoices: [
@@ -670,7 +753,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["sab", "car"],
     armorProficiencies: ["Armadura ligera"],
     weaponProficiencies: ["Armas sencillas"],
-    spellcasting: { ability: "car", caster: "pact" },
+    spellcasting: { ability: "car", caster: "pact", cantripsKnown: 2, spellsKnown: 2, preparation: "known" },
     skillChoices: { count: 2, from: WARLOCK_SKILLS },
     startingEquipmentFixed: [
       { name: "Armadura de cuero", qty: 1 },
@@ -719,7 +802,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["int", "sab"],
     armorProficiencies: [],
     weaponProficiencies: ["Dagas", "Dardos", "Hondas", "Bastones", "Ballestas ligeras"],
-    spellcasting: { ability: "int", caster: "full" },
+    spellcasting: { ability: "int", caster: "full", cantripsKnown: 3, preparation: "spellbook", spellbookCount: 6 },
     skillChoices: { count: 2, from: WIZARD_SKILLS },
     startingEquipmentFixed: [{ name: "Libro de conjuros", qty: 1 }],
     startingEquipmentChoices: [
@@ -752,6 +835,37 @@ export const CLASSES: ClassBasics[] = [
   },
 ];
 
+// Un truco que la raza/subraza otorga automáticamente. El id apunta a SPELLS.id;
+// la ability determina con qué atributo se lanza (ej. tiefling → CAR).
+export type RacialCantrip = {
+  spellId: string;
+  ability: Ability;
+};
+
+// Un truco que la raza/subraza permite elegir (ej. elfo alto → 1 truco de mago).
+export type RacialCantripChoice = {
+  fromClass: SpellClassId;
+  ability: Ability;
+  count: number;
+};
+
+export type RaceVariant = {
+  id: string;
+  label: string;
+  abilityBonus?: Partial<Record<Ability, number>>;
+  traits?: string[];
+  speedOverride?: number;
+  extraLanguages?: string[];
+  bonusLanguages?: number;
+  extraArmorProficiencies?: string[];
+  extraWeaponProficiencies?: string[];
+  hpBonusPerLevel?: number;
+  damageType?: string;
+  grantedCantrips?: RacialCantrip[];
+  cantripChoice?: RacialCantripChoice;
+  note?: string;
+};
+
 export type RaceBasics = {
   id: string;
   label: string;
@@ -759,18 +873,200 @@ export type RaceBasics = {
   abilityBonus: Partial<Record<Ability, number>>;
   traits: string[];
   languages: string[];
+  bonusLanguages?: number;
+  bonusSkills?: number;
+  grantedCantrips?: RacialCantrip[];
+  cantripChoice?: RacialCantripChoice;
+  variants?: RaceVariant[];
+  variantLabel?: string;
 };
 
+// PHB p. 123 ("Standard Languages" + "Exotic Languages").
+export const STANDARD_LANGUAGES: string[] = [
+  "Común",
+  "Enano",
+  "Élfico",
+  "Gigante",
+  "Gnomo",
+  "Goblin",
+  "Mediano",
+  "Orco",
+  "Abisal",
+  "Celestial",
+  "Dracónico",
+  "Infernal",
+  "Primordial",
+  "Profundo",
+  "Silvano",
+  "Subcomún",
+];
+
 export const RACES: RaceBasics[] = [
-  { id: "humano", label: "Humano", speed: 30, abilityBonus: { fue: 1, des: 1, con: 1, int: 1, sab: 1, car: 1 }, traits: ["Versatilidad humana"], languages: ["Común", "Un idioma adicional"] },
-  { id: "elfo", label: "Elfo", speed: 30, abilityBonus: { des: 2 }, traits: ["Visión en la oscuridad", "Sentidos agudos", "Ascendencia feérica", "Trance"], languages: ["Común", "Élfico"] },
-  { id: "enano", label: "Enano", speed: 25, abilityBonus: { con: 2 }, traits: ["Visión en la oscuridad", "Resiliencia enana", "Entrenamiento de combate enano", "Familiaridad con herramientas"], languages: ["Común", "Enano"] },
-  { id: "mediano", label: "Mediano", speed: 25, abilityBonus: { des: 2 }, traits: ["Afortunado", "Valiente", "Agilidad mediana"], languages: ["Común", "Mediano"] },
-  { id: "gnomo", label: "Gnomo", speed: 25, abilityBonus: { int: 2 }, traits: ["Visión en la oscuridad", "Astucia gnoma"], languages: ["Común", "Gnomo"] },
-  { id: "semielfo", label: "Semielfo", speed: 30, abilityBonus: { car: 2 }, traits: ["Visión en la oscuridad", "Ancestro feérico", "Versatilidad de habilidades"], languages: ["Común", "Élfico", "Un idioma adicional"] },
-  { id: "semiorco", label: "Semiorco", speed: 30, abilityBonus: { fue: 2, con: 1 }, traits: ["Visión en la oscuridad", "Amenazador", "Agresivo", "Aguante implacable", "Ataques salvajes"], languages: ["Común", "Orco"] },
-  { id: "tiefling", label: "Tiefling", speed: 30, abilityBonus: { car: 2, int: 1 }, traits: ["Visión en la oscuridad", "Resistencia infernal", "Legado infernal"], languages: ["Común", "Infernal"] },
-  { id: "dracónido", label: "Dracónido", speed: 30, abilityBonus: { fue: 2, car: 1 }, traits: ["Ascendencia dracónica", "Aliento de dragón", "Resistencia al daño"], languages: ["Común", "Dracónico"] },
+  {
+    id: "humano",
+    label: "Humano",
+    speed: 30,
+    abilityBonus: { fue: 1, des: 1, con: 1, int: 1, sab: 1, car: 1 },
+    traits: ["Versatilidad humana"],
+    languages: ["Común"],
+    bonusLanguages: 1,
+  },
+  {
+    id: "elfo",
+    label: "Elfo",
+    speed: 30,
+    abilityBonus: { des: 2 },
+    traits: ["Visión en la oscuridad", "Sentidos agudos", "Ascendencia feérica", "Trance"],
+    languages: ["Común", "Élfico"],
+    variantLabel: "Subraza",
+    variants: [
+      {
+        id: "alto",
+        label: "Elfo alto",
+        abilityBonus: { int: 1 },
+        traits: ["Entrenamiento marcial élfico", "Truco de mago (INT)", "Idioma extra"],
+        extraWeaponProficiencies: ["Espada larga", "Espada corta", "Arco corto", "Arco largo"],
+        bonusLanguages: 1,
+        cantripChoice: { fromClass: "mago", ability: "int", count: 1 },
+      },
+      {
+        id: "bosque",
+        label: "Elfo del bosque",
+        abilityBonus: { sab: 1 },
+        speedOverride: 35,
+        traits: ["Entrenamiento marcial élfico", "Pies veloces", "Máscara del salvaje"],
+        extraWeaponProficiencies: ["Espada larga", "Espada corta", "Arco corto", "Arco largo"],
+      },
+      {
+        id: "drow",
+        label: "Elfo oscuro (drow)",
+        abilityBonus: { car: 1 },
+        traits: ["Visión superior en la oscuridad (36m)", "Sensibilidad solar", "Magia drow", "Entrenamiento en armas drow"],
+        extraWeaponProficiencies: ["Estoque", "Espada corta", "Ballesta de mano"],
+        grantedCantrips: [{ spellId: "luces-danzantes", ability: "car" }],
+      },
+    ],
+  },
+  {
+    id: "enano",
+    label: "Enano",
+    speed: 25,
+    abilityBonus: { con: 2 },
+    traits: ["Visión en la oscuridad", "Resiliencia enana", "Entrenamiento de combate enano", "Familiaridad con herramientas"],
+    languages: ["Común", "Enano"],
+    variantLabel: "Subraza",
+    variants: [
+      {
+        id: "colina",
+        label: "Enano de las colinas",
+        abilityBonus: { sab: 1 },
+        traits: ["Dureza enana (+1 PG por nivel)"],
+        hpBonusPerLevel: 1,
+      },
+      {
+        id: "montana",
+        label: "Enano de las montañas",
+        abilityBonus: { fue: 2 },
+        traits: ["Entrenamiento con armaduras enano"],
+        extraArmorProficiencies: ["Armadura ligera", "Armadura media"],
+      },
+    ],
+  },
+  {
+    id: "mediano",
+    label: "Mediano",
+    speed: 25,
+    abilityBonus: { des: 2 },
+    traits: ["Afortunado", "Valiente", "Agilidad mediana"],
+    languages: ["Común", "Mediano"],
+    variantLabel: "Subraza",
+    variants: [
+      {
+        id: "piesligeros",
+        label: "Mediano piesligeros",
+        abilityBonus: { car: 1 },
+        traits: ["Sigilo natural"],
+      },
+      {
+        id: "robusto",
+        label: "Mediano robusto",
+        abilityBonus: { con: 1 },
+        traits: ["Resiliencia robusta (ventaja contra veneno, resistencia a daño de veneno)"],
+      },
+    ],
+  },
+  {
+    id: "gnomo",
+    label: "Gnomo",
+    speed: 25,
+    abilityBonus: { int: 2 },
+    traits: ["Visión en la oscuridad", "Astucia gnoma"],
+    languages: ["Común", "Gnomo"],
+    variantLabel: "Subraza",
+    variants: [
+      {
+        id: "bosque",
+        label: "Gnomo del bosque",
+        abilityBonus: { des: 1 },
+        traits: ["Ilusionista natural (truco ilusión menor, INT)", "Hablar con bestias pequeñas"],
+        grantedCantrips: [{ spellId: "ilusion-menor", ability: "int" }],
+      },
+      {
+        id: "roca",
+        label: "Gnomo de roca",
+        abilityBonus: { con: 1 },
+        traits: ["Conocimiento del artífice", "Manitas"],
+      },
+    ],
+  },
+  {
+    id: "semielfo",
+    label: "Semielfo",
+    speed: 30,
+    abilityBonus: { car: 2 },
+    traits: ["Visión en la oscuridad", "Ancestro feérico", "Versatilidad de habilidades"],
+    languages: ["Común", "Élfico"],
+    bonusLanguages: 1,
+    bonusSkills: 2,
+  },
+  {
+    id: "semiorco",
+    label: "Semiorco",
+    speed: 30,
+    abilityBonus: { fue: 2, con: 1 },
+    traits: ["Visión en la oscuridad", "Amenazador", "Agresivo", "Aguante implacable", "Ataques salvajes"],
+    languages: ["Común", "Orco"],
+  },
+  {
+    id: "tiefling",
+    label: "Tiefling",
+    speed: 30,
+    abilityBonus: { car: 2, int: 1 },
+    traits: ["Visión en la oscuridad", "Resistencia infernal", "Legado infernal"],
+    languages: ["Común", "Infernal"],
+    grantedCantrips: [{ spellId: "taumaturgia", ability: "car" }],
+  },
+  {
+    id: "dracónido",
+    label: "Dracónido",
+    speed: 30,
+    abilityBonus: { fue: 2, car: 1 },
+    traits: ["Ascendencia dracónica", "Aliento de dragón", "Resistencia al daño"],
+    languages: ["Común", "Dracónico"],
+    variantLabel: "Ancestro dracónico",
+    variants: [
+      { id: "negro", label: "Negro", damageType: "Ácido", traits: ["Aliento de ácido (línea de 9m × 1,5m, salvación DES)", "Resistencia a ácido"] },
+      { id: "azul", label: "Azul", damageType: "Rayo", traits: ["Aliento de rayo (línea de 9m × 1,5m, salvación DES)", "Resistencia a rayo"] },
+      { id: "laton", label: "Latón", damageType: "Fuego", traits: ["Aliento de fuego (línea de 9m × 1,5m, salvación DES)", "Resistencia a fuego"] },
+      { id: "bronce", label: "Bronce", damageType: "Rayo", traits: ["Aliento de rayo (línea de 9m × 1,5m, salvación DES)", "Resistencia a rayo"] },
+      { id: "cobre", label: "Cobre", damageType: "Ácido", traits: ["Aliento de ácido (línea de 9m × 1,5m, salvación DES)", "Resistencia a ácido"] },
+      { id: "oro", label: "Oro", damageType: "Fuego", traits: ["Aliento de fuego (cono 4,5m, salvación DES)", "Resistencia a fuego"] },
+      { id: "verde", label: "Verde", damageType: "Veneno", traits: ["Aliento de veneno (cono 4,5m, salvación CON)", "Resistencia a veneno"] },
+      { id: "plata", label: "Plata", damageType: "Frío", traits: ["Aliento de frío (cono 4,5m, salvación CON)", "Resistencia a frío"] },
+      { id: "rojo", label: "Rojo", damageType: "Fuego", traits: ["Aliento de fuego (cono 4,5m, salvación DES)", "Resistencia a fuego"] },
+      { id: "blanco", label: "Blanco", damageType: "Frío", traits: ["Aliento de frío (cono 4,5m, salvación CON)", "Resistencia a frío"] },
+    ],
+  },
 ];
 
 export type BackgroundBasics = {
@@ -787,12 +1083,16 @@ export type BackgroundBasics = {
 export const BACKGROUNDS: BackgroundBasics[] = [
   { id: "acolito", label: "Acólito", skillProficiencies: ["perspicacia", "religion"], languages: 2, tools: [], equipment: ["Símbolo sagrado", "Libro de oraciones", "5 varillas de incienso", "Vestiduras", "Atuendo común"], startingMoney: { gp: 15 }, feature: { name: "Refugio de los fieles", text: "Recibes cuidado y hospitalidad en templos y santuarios de tu fe." } },
   { id: "artesano", label: "Artesano de gremio", skillProficiencies: ["perspicacia", "persuasion"], languages: 1, tools: ["Herramientas de un artesano"], equipment: ["Herramientas de artesano", "Carta de presentación del gremio", "Atuendo de viajero"], startingMoney: { gp: 15 }, feature: { name: "Miembro del gremio", text: "Puedes contar con la ayuda del gremio donde vayas." } },
+  { id: "charlatan", label: "Charlatán", skillProficiencies: ["engano", "juegoDeManos"], languages: 0, tools: ["Equipo de disfraz", "Herramientas de falsificador"], equipment: ["Atuendo fino", "Equipo de disfraz", "Herramientas del timo (dados trucados, cartas marcadas, frascos de líquido coloreado o anillo con sello falso)"], startingMoney: { gp: 15 }, feature: { name: "Identidad falsa", text: "Has creado una segunda identidad con documentación, conocidos y disfraces que te permiten asumir ese papel. Además puedes falsificar documentos oficiales y cartas personales si has visto un ejemplo del tipo de documento o caligrafía." } },
   { id: "criminal", label: "Criminal", skillProficiencies: ["engano", "sigilo"], languages: 0, tools: ["Juego de herramientas de ladrón", "Un juego de juegos"], equipment: ["Palanca", "Atuendo oscuro común con capucha"], startingMoney: { gp: 15 }, feature: { name: "Contacto criminal", text: "Tienes un contacto confiable en el bajo mundo." } },
+  { id: "ermitano", label: "Ermitaño", skillProficiencies: ["medicina", "religion"], languages: 1, tools: ["Equipo de herbolario"], equipment: ["Portaescritos lleno de notas de estudios u oraciones", "Manta de invierno", "Atuendo común", "Equipo de herbolario"], startingMoney: { gp: 5 }, feature: { name: "Descubrimiento", text: "La reclusión de tu eremitorio te dio acceso a un descubrimiento único y poderoso. Su naturaleza exacta (una verdad cósmica, un lugar oculto, un hecho olvidado o una reliquia) la determinas con el DM." } },
   { id: "forastero", label: "Forastero", skillProficiencies: ["atletismo", "supervivencia"], languages: 1, tools: ["Un instrumento musical"], equipment: ["Bastón", "Trampa de caza", "Trofeo de un animal", "Atuendo de viajero"], startingMoney: { gp: 10 }, feature: { name: "Errante", text: "Recuerdas la geografía del terreno salvaje y puedes encontrar comida y agua para ti y cinco personas más." } },
   { id: "heroePueblo", label: "Héroe del pueblo", skillProficiencies: ["tratoConAnimales", "supervivencia"], languages: 0, tools: ["Un juego de herramientas de artesano", "Vehículos de tierra"], equipment: ["Herramientas de artesano", "Pala", "Olla de hierro", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Hospitalidad rústica", text: "La gente del pueblo y campesinos te abren sus puertas." } },
+  { id: "huerfano", label: "Huérfano", skillProficiencies: ["juegoDeManos", "sigilo"], languages: 0, tools: ["Equipo de disfraz", "Juego de herramientas de ladrón"], equipment: ["Cuchillo pequeño", "Mapa de la ciudad en la que creciste", "Ratón mascota", "Objeto para recordar a tus padres", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Secretos de la ciudad", text: "Conoces los patrones y pasadizos secretos de las ciudades. Fuera de combate, tú (y compañeros que guíes) podéis viajar entre dos puntos urbanos al doble de vuestra velocidad normal." } },
   { id: "marinero", label: "Marinero", skillProficiencies: ["atletismo", "percepcion"], languages: 0, tools: ["Vehículos acuáticos", "Herramientas de navegante"], equipment: ["Clavija de atraque", "18 m de cuerda de seda", "Amuleto de la suerte", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Pasaje gratis", text: "Puedes conseguir pasaje gratuito en un barco mercante para ti y tus compañeros." } },
   { id: "noble", label: "Noble", skillProficiencies: ["historia", "persuasion"], languages: 1, tools: ["Un juego de juegos"], equipment: ["Atuendo fino", "Anillo con sello", "Pergamino de linaje"], startingMoney: { gp: 25 }, feature: { name: "Posición privilegiada", text: "La gente común te trata con deferencia dada tu posición." } },
   { id: "sabio", label: "Sabio", skillProficiencies: ["arcanos", "historia"], languages: 2, tools: [], equipment: ["Botella de tinta", "Pluma", "Cuchillo pequeño", "Carta de un colega con una pregunta sin responder", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Investigador", text: "Cuando intentas aprender o recordar algo, sabes dónde y de quién obtener la información." } },
+  { id: "saltimbanqui", label: "Saltimbanqui", skillProficiencies: ["acrobacias", "interpretacion"], languages: 0, tools: ["Equipo de disfraz", "Un instrumento musical"], equipment: ["Instrumento musical a elección", "Prenda de un admirador (carta de amor, mechón de pelo o baratija)", "Disfraz", "Atuendo común"], startingMoney: { gp: 15 }, feature: { name: "Por demanda popular", text: "Siempre encuentras un sitio donde actuar (posada, taberna, circo o corte noble). Recibes alojamiento y comida gratis modestos o cómodos mientras actúes cada noche; la gente te reconoce cuando vuelves al lugar." } },
   { id: "soldado", label: "Soldado", skillProficiencies: ["atletismo", "intimidacion"], languages: 0, tools: ["Un juego de juegos", "Vehículos de tierra"], equipment: ["Insignia de rango", "Trofeo de batalla", "Juego de dados o baraja", "Atuendo común"], startingMoney: { gp: 10 }, feature: { name: "Rango militar", text: "Soldados leales te reconocen y te ofrecen apoyo." } },
 ];
 
@@ -829,13 +1129,36 @@ export const SPELL_SLOTS_FULL_CASTER: Record<number, number[]> = {
   20: [4, 3, 3, 3, 3, 2, 2, 1, 1],
 };
 
+// Número de conjuros de nivel 1+ que el personaje elige al crear ficha.
+// - "known"    → `spellcasting.spellsKnown` (bardo, hechicero, brujo).
+// - "prepared" → `level + mod(ability)` con mínimo 1 (clérigo, druida).
+// - "spellbook"→ `spellcasting.spellbookCount` (mago copia 6 conjuros en su grimorio al nivel 1).
+export function firstLevelSpellPicks(
+  spellcasting: NonNullable<ClassBasics["spellcasting"]>,
+  level: number,
+  abilityScore: number,
+): number {
+  switch (spellcasting.preparation) {
+    case "known":
+      return spellcasting.spellsKnown ?? 0;
+    case "spellbook":
+      return spellcasting.spellbookCount ?? 0;
+    case "prepared":
+      return Math.max(1, level + abilityMod(abilityScore));
+    default:
+      return 0;
+  }
+}
+
 export function spellSlotsFor(caster: "full" | "half" | "third" | "pact", level: number) {
   if (caster === "full") return SPELL_SLOTS_FULL_CASTER[Math.min(20, Math.max(1, level))] ?? [];
   if (caster === "half") {
+    if (level < 2) return [];
     const lvl = Math.floor((level + 1) / 2);
     return SPELL_SLOTS_FULL_CASTER[Math.min(20, lvl)] ?? [];
   }
   if (caster === "third") {
+    if (level < 3) return [];
     const lvl = Math.floor(level / 3);
     return SPELL_SLOTS_FULL_CASTER[Math.min(20, lvl)] ?? [];
   }

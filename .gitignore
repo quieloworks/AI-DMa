@@ -6,3 +6,9 @@ data/
 .DS_Store
 .env.local
 .env
+
+# build artifacts
+tsconfig.tsbuildinfo
+
+# copyrighted source PDFs (used locally for RAG ingestion only)
+docs/*.pdf

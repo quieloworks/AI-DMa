@@ -45,16 +45,34 @@ export async function POST(req: NextRequest) {
     )
     .get(sessionRow.story_id);
 
+  type BattleParticipant = {
+    id: string;
+    name: string;
+    kind: "player" | "ally" | "enemy" | "neutral";
+    x: number;
+    y: number;
+    hp?: { current: number; max: number };
+    status?: string[];
+  };
+  type BattleMap = {
+    terrain?: string;
+    grid: { cols: number; rows: number; cellFeet?: number };
+    participants: BattleParticipant[];
+    obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
+  };
   type PersistedState = {
     players?: Array<{ id: string; statusEffects?: string[] }>;
     summary?: string;
     recentLog?: string[];
     sceneTags?: string[];
     sceneImage?: string;
+    coverImage?: string;
     tone?: number;
     difficulty?: Difficulty;
     openingDone?: boolean;
     initiative?: Array<{ player_id: string; value: number }>;
+    combat?: boolean;
+    battleMap?: BattleMap | null;
   };
 
   let state: PersistedState = {};
@@ -226,6 +244,65 @@ export async function POST(req: NextRequest) {
               .map((i) => ({ player_id: i.player_id as string, value: i.value as number }));
           }
 
+          let nextCombat = nextState.combat === true;
+          if (typeof actObj.combat === "boolean") nextCombat = actObj.combat;
+          if (actObj.combat_end === true) nextCombat = false;
+          nextState.combat = nextCombat;
+
+          const rawBattle = actObj.battle_map;
+          if (rawBattle && typeof rawBattle === "object" && !Array.isArray(rawBattle)) {
+            const bm = rawBattle as Record<string, unknown>;
+            const gridRaw = (bm.grid as Record<string, unknown> | undefined) ?? {};
+            const cols = Math.max(6, Math.min(40, Number(gridRaw.cols) || 20));
+            const rows = Math.max(6, Math.min(40, Number(gridRaw.rows) || 12));
+            const cellFeet = Number(gridRaw.cellFeet) || 5;
+            const parts = Array.isArray(bm.participants) ? (bm.participants as Array<Record<string, unknown>>) : [];
+            const participants: BattleParticipant[] = parts
+              .map((p) => {
+                const kindRaw = typeof p.kind === "string" ? (p.kind as string).toLowerCase() : "";
+                const kind: BattleParticipant["kind"] =
+                  kindRaw === "enemy" || kindRaw === "ally" || kindRaw === "neutral" || kindRaw === "player"
+                    ? (kindRaw as BattleParticipant["kind"])
+                    : "neutral";
+                const hpRaw = p.hp as Record<string, unknown> | undefined;
+                const hp =
+                  hpRaw && typeof hpRaw === "object"
+                    ? {
+                        current: Math.max(0, Number(hpRaw.current) || 0),
+                        max: Math.max(1, Number(hpRaw.max) || 1),
+                      }
+                    : undefined;
+                return {
+                  id: typeof p.id === "string" ? (p.id as string) : "",
+                  name: typeof p.name === "string" ? (p.name as string) : "?",
+                  kind,
+                  x: Math.max(0, Math.min(cols - 1, Math.round(Number(p.x) || 0))),
+                  y: Math.max(0, Math.min(rows - 1, Math.round(Number(p.y) || 0))),
+                  hp,
+                  status: Array.isArray(p.status) ? (p.status as unknown[]).filter((s): s is string => typeof s === "string") : undefined,
+                };
+              })
+              .filter((p) => p.id);
+            const obsRaw = Array.isArray(bm.obstacles) ? (bm.obstacles as Array<Record<string, unknown>>) : [];
+            const obstacles = obsRaw
+              .map((o) => ({
+                x: Math.max(0, Math.round(Number(o.x) || 0)),
+                y: Math.max(0, Math.round(Number(o.y) || 0)),
+                w: Math.max(1, Math.round(Number(o.w) || 1)),
+                h: Math.max(1, Math.round(Number(o.h) || 1)),
+                kind: typeof o.kind === "string" ? (o.kind as string) : "cover",
+              }))
+              .filter((o) => o.x < cols && o.y < rows);
+            nextState.battleMap = {
+              terrain: typeof bm.terrain === "string" ? (bm.terrain as string) : nextState.sceneTags?.[0],
+              grid: { cols, rows, cellFeet },
+              participants,
+              obstacles,
+            };
+          }
+
+          if (!nextCombat) nextState.battleMap = null;
+
           db.prepare("UPDATE session SET state_json = ?, updated_at = ? WHERE id = ?").run(
             JSON.stringify(nextState),
             Date.now(),
@@ -254,6 +331,12 @@ export async function POST(req: NextRequest) {
                   id: `dm:${Date.now().toString(36)}`,
                 });
               }
+              io.to(`session:${body.sessionId}`).emit("scene:update", {
+                sessionId: body.sessionId,
+                combat: nextState.combat === true,
+                battleMap: nextState.battleMap ?? null,
+                sceneTags: nextState.sceneTags ?? [],
+              });
             }
           } catch {}
         } catch {}

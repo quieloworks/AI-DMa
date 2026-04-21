@@ -103,6 +103,38 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
+      {(ch.spells.known.length > 0 || Object.keys(ch.spells.slots).length > 0) && (
+        <div className="mt-6 card">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="label">Conjuros</p>
+            {ch.spells.ability && (
+              <span className="badge">Atributo: {ABILITY_LABEL[ch.spells.ability]}</span>
+            )}
+          </div>
+          {Object.keys(ch.spells.slots).length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2 text-sm">
+              {Object.entries(ch.spells.slots)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([lvl, s]) => (
+                  <span key={lvl} className="badge">
+                    Nv {lvl}: {s.max - s.used}/{s.max}
+                  </span>
+                ))}
+            </div>
+          )}
+          <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
+            {ch.spells.known.map((s, i) => (
+              <li key={i}>
+                <span style={{ color: "var(--color-accent)" }}>
+                  {s.level === 0 ? "Truco" : `Nv ${s.level}`}
+                </span>{" "}
+                · {s.prepared ? "●" : "○"} {s.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="card">
           <p className="label mb-3">Equipamiento</p>

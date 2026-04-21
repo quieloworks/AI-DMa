@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { parseDmResponse } from "./parse";
-import { MapCanvas } from "./map";
+import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
 
 type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -54,10 +54,13 @@ type ChatBubble = {
 type InitialState = {
   sceneTags?: string[];
   sceneImage?: string;
+  coverImage?: string;
   tone?: number;
   difficulty?: Difficulty | string;
   openingDone?: boolean;
   autoSpeak?: boolean;
+  combat?: boolean;
+  battleMap?: BattleMap | null;
 };
 
 function randomId() {
@@ -106,8 +109,13 @@ export function StoryRoom({
   const [sceneHint, setSceneHint] = useState<string>(initialState.sceneTags?.[0] ?? "ninguno");
   const [showQr, setShowQr] = useState(false);
   const [sceneImage, setSceneImage] = useState<string | null>(initialState.sceneImage ?? null);
+  const [coverImage, setCoverImage] = useState<string | null>(initialState.coverImage ?? null);
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [generatingCover, setGeneratingCover] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [combat, setCombat] = useState<boolean>(initialState.combat === true);
+  const [battleMap, setBattleMap] = useState<BattleMap | null>(initialState.battleMap ?? null);
+  const [turnCounter, setTurnCounter] = useState(0);
   const [tone, setTone] = useState<number>(() =>
     typeof initialState.tone === "number" ? Math.max(0, Math.min(100, initialState.tone)) : 50
   );
@@ -269,6 +277,16 @@ export function StoryRoom({
         )
       );
     });
+    s.on(
+      "scene:update",
+      (evt: { sessionId: string; combat?: boolean; battleMap?: BattleMap | null; sceneTags?: string[] }) => {
+        if (evt.sessionId !== sessionId) return;
+        if (typeof evt.combat === "boolean") setCombat(evt.combat);
+        if (evt.battleMap !== undefined) setBattleMap(evt.battleMap);
+        if (Array.isArray(evt.sceneTags) && evt.sceneTags[0]) setSceneHint(evt.sceneTags[0]);
+        setTurnCounter((t) => t + 1);
+      }
+    );
     setSocket(s);
     return () => {
       s.disconnect();
@@ -340,10 +358,25 @@ export function StoryRoom({
           setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: buffer } : m)));
         }
         const parsed = parseDmResponse(buffer);
-        if (parsed.actions?.map && typeof parsed.actions.map === "object") {
-          const hint = (parsed.actions.map as { hint?: string }).hint;
+        const actObj = parsed.actions as Record<string, unknown>;
+        if (actObj?.map && typeof actObj.map === "object") {
+          const hint = (actObj.map as { hint?: string }).hint;
           if (hint) setSceneHint(hint);
         }
+        let nextCombat = combat;
+        if (typeof actObj?.combat === "boolean") nextCombat = actObj.combat as boolean;
+        if (actObj?.combat_end === true) nextCombat = false;
+        if (nextCombat !== combat) setCombat(nextCombat);
+
+        if (actObj?.battle_map && typeof actObj.battle_map === "object" && !Array.isArray(actObj.battle_map)) {
+          try {
+            const bm = actObj.battle_map as BattleMap;
+            setBattleMap(bm);
+          } catch {}
+        }
+        if (!nextCombat) setBattleMap(null);
+        setTurnCounter((t) => t + 1);
+
         const clean = parsed.narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
         setChat((prev) => prev.map((m) => (m.id === dmId ? { ...m, text: clean } : m)));
         if (payload.action === "opening") setOpeningDone(true);
@@ -360,7 +393,7 @@ export function StoryRoom({
         setStreaming(false);
       }
     },
-    [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText]
+    [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText, combat]
   );
 
   useEffect(() => {
@@ -452,16 +485,55 @@ export function StoryRoom({
       const res = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, title: story.title, tags: ["historia", story.id, sceneHint], size: "1536x1024" }),
+        body: JSON.stringify({ prompt, title: story.title, tags: ["historia", story.id, sceneHint, "escena"], size: "1536x1024" }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "falló la generación");
       setSceneImage(data.url);
+      void persistState({ sceneImage: data.url });
     } catch (err) {
       setImageError((err as Error).message);
     } finally {
       setGeneratingImage(false);
     }
+  }
+
+  const generateCover = useCallback(async () => {
+    if (generatingCover || coverImage) return;
+    setGeneratingCover(true);
+    try {
+      const prompt = [
+        `Portada cinematográfica para una campaña de Dungeons & Dragons titulada "${story.title}".`,
+        story.summary ? `Premisa: ${story.summary.slice(0, 400)}.` : "",
+        `Ambiente sugerido: ${sceneHint === "ninguno" ? "fantasía heroica" : sceneHint}.`,
+        "Composición panorámica tipo póster, pintura digital, atmósfera épica, sin texto ni logos, protagonistas pequeños en un paisaje majestuoso.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, title: `${story.title} · portada`, tags: ["historia", story.id, "portada"], size: "1536x1024" }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) return;
+      setCoverImage(data.url);
+      void persistState({ coverImage: data.url });
+    } catch {
+    } finally {
+      setGeneratingCover(false);
+    }
+  }, [coverImage, generatingCover, sceneHint, story.id, story.summary, story.title]);
+
+  useEffect(() => {
+    if (coverImage) return;
+    if (!openingDone) return;
+    void generateCover();
+  }, [coverImage, openingDone, generateCover]);
+
+  function clearScene() {
+    setSceneImage(null);
+    void persistState({ sceneImage: null });
   }
 
   return (
@@ -474,9 +546,27 @@ export function StoryRoom({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="badge">{story.mode === "auto" ? "DM automático" : "DM asistente"}</span>
-            <button onClick={generateScene} className="btn-ghost" disabled={generatingImage}>
+            {combat && (
+              <span
+                className="badge"
+                style={{ background: "rgba(216,90,48,0.18)", color: "#f4a582", borderColor: "rgba(216,90,48,0.35)" }}
+              >
+                ⚔ En combate
+              </span>
+            )}
+            <button
+              onClick={generateScene}
+              className="btn-ghost"
+              disabled={generatingImage || combat}
+              title={combat ? "El mapa táctico está activo durante el combate" : "Pinta una ilustración de la escena actual"}
+            >
               {generatingImage ? "Pintando…" : sceneImage ? "Nueva escena" : "Generar escena"}
             </button>
+            {sceneImage && !combat && (
+              <button onClick={clearScene} className="btn-ghost" title="Volver a la portada por defecto">
+                Portada
+              </button>
+            )}
             <button onClick={() => setShowQr((v) => !v)} className="btn-ghost">
               {showQr ? "Ocultar QR" : "Invitar por QR"}
             </button>
@@ -508,7 +598,29 @@ export function StoryRoom({
           className="relative overflow-hidden rounded-lg"
           style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-secondary)", minHeight: 420 }}
         >
-          {sceneImage ? (
+          {combat && battleMap ? (
+            <BattleMapCanvas battleMap={battleMap} turn={turnCounter} />
+          ) : combat ? (
+            <div className="relative h-full w-full" style={{ minHeight: 420 }}>
+              <MapCanvas hint={sceneHint} players={players} />
+              <div
+                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                style={{ background: "rgba(15,14,12,0.35)" }}
+              >
+                <p
+                  className="text-sm"
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    color: "#f4a582",
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  ⚔ esperando posiciones del DM…
+                </p>
+              </div>
+            </div>
+          ) : sceneImage ? (
             <div className="relative h-full w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={sceneImage} alt="Escena" className="h-full w-full object-cover" style={{ minHeight: 420 }} />
@@ -516,18 +628,55 @@ export function StoryRoom({
                 className="pointer-events-none absolute inset-0"
                 style={{ background: "linear-gradient(to top, rgba(15,14,12,0.55), transparent 45%)" }}
               />
-              <div className="absolute right-3 top-3">
-                <button
-                  className="btn-ghost"
-                  style={{ padding: "4px 10px", fontSize: 11 }}
-                  onClick={() => setSceneImage(null)}
+              <div className="absolute left-3 top-3">
+                <span
+                  className="badge"
+                  style={{ background: "rgba(15,14,12,0.55)", color: "#faf7f1", borderColor: "rgba(255,255,255,0.15)" }}
                 >
-                  Volver al mapa
-                </button>
+                  Escena actual
+                </span>
+              </div>
+            </div>
+          ) : coverImage ? (
+            <div className="relative h-full w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={coverImage} alt="Portada" className="h-full w-full object-cover" style={{ minHeight: 420 }} />
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ background: "linear-gradient(to top, rgba(15,14,12,0.65), transparent 55%)" }}
+              />
+              <div className="absolute bottom-4 left-5 right-5">
+                <p
+                  className="label"
+                  style={{ color: "rgba(244,239,230,0.7)", letterSpacing: "0.14em" }}
+                >
+                  Portada
+                </p>
+                <h2
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    color: "#faf7f1",
+                    fontSize: 26,
+                    lineHeight: 1.15,
+                    textShadow: "0 2px 12px rgba(0,0,0,0.55)",
+                  }}
+                >
+                  {story.title}
+                </h2>
               </div>
             </div>
           ) : (
-            <MapCanvas hint={sceneHint} players={players} />
+            <div className="relative h-full w-full" style={{ minHeight: 420 }}>
+              <MapCanvas hint={sceneHint} players={players} />
+              {generatingCover && (
+                <div
+                  className="pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs"
+                  style={{ background: "rgba(15,14,12,0.6)", color: "rgba(244,239,230,0.75)" }}
+                >
+                  pintando portada…
+                </div>
+              )}
+            </div>
           )}
           {imageError && (
             <div
