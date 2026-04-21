@@ -1,7 +1,7 @@
 # Character creation — Handoff para próximos PRs
 
 > Contexto para que otro agente continúe los puntos pendientes de la auditoría contra el PHB 5E.
-> Estado a fecha de este documento: completados los fixes **1–6**, los intermedios **3.2, 3.3, 3.4 y 3.6** de la iteración previa, el PR A (**3.1 Selección inicial de trucos y conjuros**), el PR C (**3.2 Conjuros de paladín y explorador a nivel ≥ 2**) y el PR D (**3.6 Preparación diaria del mago**).
+> Estado a fecha de este documento: completados los fixes **1–6**, los intermedios **3.2, 3.3, 3.4 y 3.6** de la iteración previa, el PR A (**3.1 Selección inicial de trucos y conjuros**), el PR C (**3.2 Conjuros de paladín y explorador a nivel ≥ 2**), el PR D (**3.6 Preparación diaria del mago**), el PR E completo (**3.3 Humano variante + catálogo de dotes + ASI/dote a niveles ≥ 4** + ampliación incremental §3.1).
 
 ---
 
@@ -9,14 +9,15 @@
 
 | Área | Archivo | Qué vive aquí |
 | --- | --- | --- |
-| Reglas / datos / schema | `lib/character.ts` | `CharacterSchema` (Zod), `RACES`, `CLASSES`, `BACKGROUNDS`, `SKILLS`, `STANDARD_ARRAY`, `STANDARD_LANGUAGES`, helpers (`abilityMod`, `maxHpAtLevel1`, `proficiencyBonus`, `spellSlotsFor`, `computeAc`, `pointBuyTotal`, `findArmor`, `firstLevelSpellPicks`, `wizardPreparedCount`) |
-| Catálogo de conjuros | `lib/spells.ts` | `SPELLS` (24 trucos + 48 conjuros de nivel 1 del PHB cap. 11), tipos `Spell`, `SpellSchool`, `SpellClassId`, helpers `spellsForClassAtLevel`, `findSpellByName` |
-| Tipos raciales | `lib/character.ts` → `RaceBasics`, `RaceVariant` | `bonusLanguages`, `bonusSkills`, `speedOverride`, `hpBonusPerLevel`, `extraArmor/WeaponProficiencies`, `extraLanguages`, `damageType`, `grantedCantrips`, `cantripChoice` |
+| Reglas / datos / schema | `lib/character.ts` | `CharacterSchema` (Zod, con `feats: string[]`), `RACES`, `CLASSES`, `BACKGROUNDS`, `SKILLS`, `STANDARD_ARRAY`, `STANDARD_LANGUAGES`, helpers (`abilityMod`, `maxHpAtLevel1`, `proficiencyBonus`, `spellSlotsFor`, `computeAc`, `pointBuyTotal`, `findArmor`, `firstLevelSpellPicks`, `wizardPreparedCount`, `asiCountForClassAtLevel`, `asiLevelsForClass`) |
+| Catálogo de conjuros | `lib/spells.ts` | `SPELLS` (24 trucos + ~60 conjuros de nivel 1 + 2 conjuros de nivel 3 del PHB cap. 11), tipos `Spell`, `SpellSchool`, `SpellClassId`, helpers `spellsForClassAtLevel`, `findSpellByName` |
+| Catálogo de dotes | `lib/feats.ts` | `FEATS` (42 dotes del PHB cap. 6), tipo `Feat` (`abilityBonus?`, `prerequisite?`, `summary`, `grants[]`), helper `findFeat` |
+| Tipos raciales | `lib/character.ts` → `RaceBasics`, `RaceVariant` | `bonusLanguages`, `bonusSkills`, `bonusFeats`, `customAbilityBonus`, `speedOverride`, `hpBonusPerLevel`, `extraArmor/WeaponProficiencies`, `extraLanguages`, `damageType`, `grantedCantrips`, `cantripChoice` |
 | Tipos de clase | `lib/character.ts` → `ClassBasics` | `spellcasting: { ability, caster, cantripsKnown?, spellsKnown?, preparation?, spellbookCount? }`, `startingEquipmentFixed`, `startingEquipmentChoices`, `startingGoldDice`, proficiencies |
 | Trasfondos | `lib/character.ts` → `BackgroundBasics` + `BACKGROUNDS` | 13 entradas cubriendo todo el PHB core |
-| Wizard UI | `app/character/new/wizard.tsx` | Stepper (`race`, `class`, `background`, `abilities`, `skills`, `spells`\*, `details`, `equipo`, `review`). El paso `spells` aparece solo si la clase tiene `cantripsKnown/spellsKnown/spellbookCount > 0` (para paladín/explorador se activa automáticamente en nivel ≥ 2) o la raza/subraza tiene `cantripChoice` |
+| Wizard UI | `app/character/new/wizard.tsx` | Stepper (`race`, `class`, `background`, `abilities`, `feats`\* (label "Mejoras"), `skills`, `spells`\*, `details`, `equipo`, `review`). El paso `feats` aparece si la raza/subraza otorga `bonusFeats > 0` (Humano variante = 1) **o** la clase tiene ≥ 1 ASI/dote disponible al nivel actual (`asiCountForClassAtLevel`). Dentro del paso conviven dos secciones: dotes raciales y slots ASI de clase (cada slot: +2 a un atributo, +1 a dos distintos, o canjear por una dote). El paso `spells` aparece solo si la clase tiene `cantripsKnown/spellsKnown/spellbookCount > 0` (para paladín/explorador se activa automáticamente en nivel ≥ 2) o la raza/subraza tiene `cantripChoice` |
 | API | `app/api/character/route.ts` | POST valida contra `CharacterSchema`, persiste en SQLite (`lib/db.ts`) |
-| Hoja | `app/character/[id]/page.tsx` + componentes relacionados | Renderiza la ficha final; sección de conjuros lista trucos/nivel 1, estado preparado y ranuras disponibles |
+| Hoja | `app/character/[id]/page.tsx` + componentes relacionados | Renderiza la ficha final; sección de conjuros lista trucos/nivel 1, estado preparado y ranuras disponibles; nueva sección "Dotes" con resolve vía `findFeat(id)` |
 | PHB cache | `data/cache/handbook-pages.json` | Texto extraído por `scripts/ingest-handbook.ts`; úsalo para grepear reglas en vez del PDF |
 
 ### Fuente de verdad
@@ -59,6 +60,33 @@ Cambios mergeados al branch de trabajo (últimas iteraciones):
    - Si el jugador cambia los 6 conjuros del grimorio, los preparados que queden fuera se eliminan automáticamente.
    - `buildKnownSpells` respeta el subconjunto `chosenPrepared` cuando `preparation === "spellbook"`: esos conjuros van con `prepared: true`; el resto del grimorio con `prepared: false`. Clérigo, druida, paladín, bardo, hechicero, brujo y explorador siguen marcándose todos como preparados.
    - Validación `nextDisabled` en el paso `spells` exige llenar el panel de preparados antes de avanzar.
+14. **Humano variante + catálogo de dotes (§3.3 resuelto — PR E, parte 1):**
+   - `RaceBasics` y `RaceVariant` admiten `customAbilityBonus: { count, value, excludes? }`, `bonusSkills`, `bonusFeats`.
+   - Humano refactorizado: el top-level `abilityBonus` queda vacío y las dos variantes (`estandar` y `variante`) portan las reglas:
+     - **Humano estándar** (`abilityBonus: { fue:1, des:1, con:1, int:1, sab:1, car:1 }`).
+     - **Humano variante** (`customAbilityBonus: { count: 2, value: 1 }` + `bonusSkills: 1` + `bonusFeats: 1`).
+   - `RaceStep` detecta `customAbilityBonus` y muestra un panel de checkboxes (patrón del Semielfo). `SkillsStep` suma `race.bonusSkills + variant.bonusSkills` para el panel extra.
+   - Nuevo `lib/feats.ts` con los **42 dotes canónicos del PHB cap. 6** (`id`, `name`, `prerequisite?`, `abilityBonus?: { count, value, from }`, `summary`, `grants: string[]`). Algunos dan +1 a un único atributo (Actor, Duradero), otros a una elección (Atleta = FUE/DES, Resiliente = cualquiera).
+   - `CharacterSchema` incluye `feats: z.array(z.string()).default([])`. La hoja del personaje resuelve los dotes vía `findFeat(id)` y renderiza su `summary` + `grants[]`.
+15. **ASI vs dote a niveles ≥ 4 (§3.3.2 resuelto — PR E, parte 2):**
+   - Nuevos helpers en `lib/character.ts`:
+     - `asiCountForClassAtLevel(classId, level)` → nº de slots ASI/dote disponibles (5 base en niveles 4/8/12/16/19; guerrero añade 6 y 14; pícaro añade 10).
+     - `asiLevelsForClass(classId, level)` → niveles concretos en los que caen (para la UI).
+   - El paso del wizard (renombrado a "Mejoras") ahora renderiza dos secciones:
+     1. **Dote racial** — idéntica a antes (Humano variante = 1 slot; valida `abilityBonus.from.length > 1` igual).
+     2. **Mejoras de clase** — un panel por cada ASI disponible al nivel actual. Cada slot tiene dos modos: *Subir atributos* (elige 1 atributo → +2, o 2 atributos distintos → +1/+1; botón "Concentrar en +2" para promover) o *Dote* (lista radio de `FEATS` con la misma UI de selección de atributo para dotes con ASI parcial).
+   - Estado del wizard: `asiChoices: AsiChoice[]` (`{ kind: "none" | "asi" | "feat"; picks?: Ability[]; featId?: string; abilityChoice?: Ability }`). Un `useEffect` lo mantiene sincronizado con `asiSlots` al cambiar clase/nivel: añade `{kind:"none"}` al crecer y trunca al decrecer.
+   - `racialBonus` suma: raza + variante + semielfo + customAbilityBonus + dotes raciales + ASI picks + dotes ASI. El payload guarda `abilityRacialBonus` con el total y `feats: [...racial, ...asiFeats]` concatenado.
+   - Validación `nextDisabled`:
+     - Slots en `kind:"none"` bloquean.
+     - ASI con `picks.length === 0` bloquea.
+     - ASI con dos atributos distintos permitido; `picks = [a, a]` cuenta como "+2 a uno".
+     - Dote sin `featId` o con `abilityBonus.from.length > 1` sin `abilityChoice` bloquea.
+   - No se permite picar la misma dote dos veces (UI deshabilita en `reservedRacial` / `reservedOtherSlots`).
+   - Pendiente relacionado: §3.3 ahora está cerrado; las variantes racing-específicas (ej. Humano variante entra en nivel alto con su dote gratis + ASI de clase sumadas correctamente) y el límite RAW de **nunca pasar de 20** en ningún atributo **no** están enforzados todavía (ver §3.3.3 abajo).
+16. **Ampliación incremental del catálogo de conjuros (§3.1 parcial):**
+   - Añadidos a `SPELLS`: `golpe-abrasador`, `golpe-iracundo`, `golpe-atronador`, `duelo-forzado` (paladín); `golpe-ensarzador`, `golpe-viento-ceferino` (explorador); `estrepito-trueno` (multi-clase); `brazos-hadar`, `armadura-agathys`, `maldicion-sangrienta` (brujo); `rayo-caos` (hechicero); `hablar-muertos`, `disipar-magia` (nivel 3, multi-clase) para tener material disponible cuando se desbloqueen slots superiores.
+   - Quedan pendientes conjuros de nivel ≥ 2 masivos (ver §3.1 abajo).
 
 Verificación: `npx tsc --noEmit` pasa sin errores y los archivos tocados no reportan lints.
 
@@ -96,19 +124,13 @@ El patrón está establecido; es mecánico: abrir PHB cap. 11, traducir nombre, 
 
 No bloquea; afecta la granularidad de la ficha.
 
-### 3.3 🟠 Variante Humana + Dotes (feats) — **mejora grande**
+### 3.3 ✅ Variante Humana + Dotes + ASI — **resuelto**
 
-**Reglas PHB p. 31 (variante) y Ch. 6:** Variante = +1 a dos atributos distintos, 1 habilidad, 1 dote.
+Completo en §1 puntos 14 y 15. Lo único que queda abierto:
 
-**Implementación sugerida:**
+**3.3.3 🟠 Límite RAW de 20 en atributos — no enforzado.** PHB p. 12: los ASIs nunca pueden subir una puntuación por encima de 20. Hoy el wizard deja al jugador elegir +2 a FUE aunque ya esté en 20. Propuesta: en `AsiSlot`, disable el botón de un atributo si `abilities[a] + racialBonus[a] >= 20` (considerando que ese mismo slot podría aportar el exceso). Cálculo: tomar el bonus actual excluyendo este slot y verificar.
 
-1. Añadir `variants` al Humano en `RACES`: `[{ id: "estandar", label: "Humano estándar" }, { id: "variante", label: "Humano variante" }]`. Estándar mantiene `abilityBonus: { fue:1, des:1, con:1, int:1, sab:1, car:1 }`. Variante apaga ese mapa y usa `customAbilityBonus: { count: 2, value: +1 }` + `bonusSkills: 1` + `bonusFeats: 1`.
-2. `RaceStep` ya detecta `race.variants`; hace falta UI para elegir las 2 abilities del humano variante (patrón igual al semielfo).
-3. Crear catálogo `FEATS` en `lib/character.ts` (o `lib/feats.ts` si crece) con los ~40 dotes del PHB cap. 6. Shape sugerido: `{ id, label, prerequisites?, abilityBonus?, grants: string[], extraProficiencies? }`.
-4. Nuevo paso opcional `"feats"` visible cuando `bonusFeats > 0` **o** cuando el personaje es nivel ≥ 4 (ASI vs dote). En niveles ≥ 4 permitir "dote o +2 atributo".
-5. Extender `CharacterSchema` con `feats: z.array(z.string()).default([])`.
-
-**Scope grande:** considera dividir en dos PRs (variante humana + UI primero; catálogo completo de dotes con ASI después).
+**3.3.4 🟢 Persistencia estructurada del desglose racial vs clase.** Hoy se aplana todo en `abilityRacialBonus` y `feats: string[]`. Si el futuro motor de reglas o UI de hoja quiere distinguir "ASI nivel 4 (guerrero)" vs "dote racial (humano variante)", hará falta guardar `asiChoices` en el schema. Para la creación actual no es necesario.
 
 ### 3.4 🟢 Rasgos pasivos mecánicos — **requiere motor de reglas**
 
@@ -245,11 +267,12 @@ npm run ingest:handbook
 
 ## 7. Resumen de prioridades sugerido para próximos PRs
 
-1. **PR E (mejora grande):** 3.3 Variante Humana + catálogo de dotes; extiende schema + UI.
-2. **PR F (rolling):** 3.1 ampliar catálogo `SPELLS` (conjuros nivel 1 restantes, empezando por paladín/explorador si apuntamos a ficha nivel alto; luego niveles 2+ cuando el creador desbloquee slots superiores).
-3. **PR G (mejora menor):** 3.2 Selectores finos de herramientas/instrumentos para Monje, Bardo y trasfondos con opción abierta.
-4. **PR H (UX):** 3.5 Extender la subsección "preparados hoy" del mago a clérigo/druida/paladín si se considera valioso.
-5. **PR I (largo plazo):** 3.4 Motor de reglas pasivas que consuma `traits`/`variant.*`/`damageType`.
+1. **PR F (rolling):** 3.1 ampliar catálogo `SPELLS` — sobre todo niveles 2+ para lanzadores completos a nivel ≥ 3; también revisar huecos del nivel 1 (mantra: abrir PHB cap. 11, traducir, picar escuela y clases).
+2. **PR G (pulido):** 3.3.3 Enforce el límite RAW de 20 en los ASIs (deshabilitar botón cuando el atributo ya esté en 20 neto; mostrar tooltip).
+3. **PR H (mejora menor):** 3.2 Selectores finos de herramientas/instrumentos para Monje, Bardo y trasfondos con opción abierta.
+4. **PR I (UX):** 3.5 Extender la subsección "preparados hoy" del mago a clérigo/druida/paladín si se considera valioso.
+5. **PR J (largo plazo):** 3.4 Motor de reglas pasivas que consuma `traits`/`variant.*`/`damageType`.
+6. **PR K (opcional):** 3.3.4 Persistir `asiChoices` estructurado en el schema si se quiere distinguir fuentes de bonus en la ficha.
 
 ---
 

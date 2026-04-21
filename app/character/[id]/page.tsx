@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
 import { ABILITIES, ABILITY_LABEL, SKILLS, abilityMod, CharacterSchema, effectiveAbility, initiative, proficiencyBonus, savingThrow, skillBonus } from "@/lib/character";
+import { findFeat } from "@/lib/feats";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +132,38 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
                 · {s.prepared ? "●" : "○"} {s.name}
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {ch.feats.length > 0 && (
+        <div className="mt-6 card">
+          <p className="label mb-3">Dotes</p>
+          <ul className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
+            {ch.feats.map((id) => {
+              const feat = findFeat(id);
+              if (!feat) return null;
+              return (
+                <li key={id}>
+                  <p>
+                    <strong>{feat.name}</strong>
+                    {feat.prerequisite && (
+                      <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                        Req: {feat.prerequisite}
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    {feat.summary}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                    {feat.grants.map((line, i) => (
+                      <li key={i}>· {line}</li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

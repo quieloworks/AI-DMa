@@ -94,6 +94,7 @@ export const CharacterSchema = z.object({
     })
     .default({ known: [], slots: {} }),
   features: z.array(z.object({ name: z.string(), source: z.string(), text: z.string() })).default([]),
+  feats: z.array(z.string()).default([]),
   portrait: z.string().optional(),
   notes: z.string().optional(),
   personality: z
@@ -109,6 +110,24 @@ export function abilityMod(score: number): number {
 
 export function proficiencyBonus(level: number): number {
   return Math.floor((level - 1) / 4) + 2;
+}
+
+// Niveles a los que cada clase obtiene una Ability Score Improvement (o una dote en su lugar).
+// PHB: nivel 4, 8, 12, 16, 19 para todos, + 6 y 14 extra para guerrero, + 10 extra para pícaro.
+const ASI_CLASS_LEVELS: Record<string, number[]> = {
+  guerrero: [4, 6, 8, 12, 14, 16, 19],
+  picaro: [4, 8, 10, 12, 16, 19],
+};
+const DEFAULT_ASI_LEVELS = [4, 8, 12, 16, 19];
+
+export function asiCountForClassAtLevel(classId: string, level: number): number {
+  const schedule = ASI_CLASS_LEVELS[classId] ?? DEFAULT_ASI_LEVELS;
+  return schedule.filter((l) => level >= l).length;
+}
+
+export function asiLevelsForClass(classId: string, level: number): number[] {
+  const schedule = ASI_CLASS_LEVELS[classId] ?? DEFAULT_ASI_LEVELS;
+  return schedule.filter((l) => level >= l);
 }
 
 export function effectiveAbility(char: Character, ab: Ability): number {
@@ -849,14 +868,25 @@ export type RacialCantripChoice = {
   count: number;
 };
 
+// Permite elegir `count` atributos a +value cada uno (Humano variante = 2 × +1).
+// Los atributos elegibles son todos salvo los explícitamente excluidos.
+export type CustomAbilityBonus = {
+  count: number;
+  value: number;
+  excludes?: Ability[];
+};
+
 export type RaceVariant = {
   id: string;
   label: string;
   abilityBonus?: Partial<Record<Ability, number>>;
+  customAbilityBonus?: CustomAbilityBonus;
   traits?: string[];
   speedOverride?: number;
   extraLanguages?: string[];
   bonusLanguages?: number;
+  bonusSkills?: number;
+  bonusFeats?: number;
   extraArmorProficiencies?: string[];
   extraWeaponProficiencies?: string[];
   hpBonusPerLevel?: number;
@@ -871,10 +901,12 @@ export type RaceBasics = {
   label: string;
   speed: number;
   abilityBonus: Partial<Record<Ability, number>>;
+  customAbilityBonus?: CustomAbilityBonus;
   traits: string[];
   languages: string[];
   bonusLanguages?: number;
   bonusSkills?: number;
+  bonusFeats?: number;
   grantedCantrips?: RacialCantrip[];
   cantripChoice?: RacialCantripChoice;
   variants?: RaceVariant[];
@@ -906,10 +938,31 @@ export const RACES: RaceBasics[] = [
     id: "humano",
     label: "Humano",
     speed: 30,
-    abilityBonus: { fue: 1, des: 1, con: 1, int: 1, sab: 1, car: 1 },
+    abilityBonus: {},
     traits: ["Versatilidad humana"],
     languages: ["Común"],
     bonusLanguages: 1,
+    variantLabel: "Variante",
+    variants: [
+      {
+        id: "estandar",
+        label: "Humano estándar",
+        abilityBonus: { fue: 1, des: 1, con: 1, int: 1, sab: 1, car: 1 },
+        traits: ["+1 a todas las puntuaciones de característica"],
+      },
+      {
+        id: "variante",
+        label: "Humano variante",
+        customAbilityBonus: { count: 2, value: 1 },
+        bonusSkills: 1,
+        bonusFeats: 1,
+        traits: [
+          "Elige dos atributos distintos y súbelos +1",
+          "Competencia en una habilidad adicional",
+          "Una dote inicial a elección",
+        ],
+      },
+    ],
   },
   {
     id: "elfo",

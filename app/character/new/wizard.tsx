@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ABILITIES,
@@ -12,6 +12,8 @@ import {
   STANDARD_ARRAY,
   STANDARD_LANGUAGES,
   abilityMod,
+  asiCountForClassAtLevel,
+  asiLevelsForClass,
   computeAc,
   firstLevelSpellPicks,
   maxHpAtLevel1,
@@ -27,14 +29,16 @@ import {
   type RaceVariant,
 } from "@/lib/character";
 import { SPELLS, spellsForClassAtLevel, type Spell, type SpellClassId } from "@/lib/spells";
+import { FEATS, type Feat } from "@/lib/feats";
 
-type Step = "race" | "class" | "background" | "abilities" | "skills" | "spells" | "details" | "equipo" | "review";
+type Step = "race" | "class" | "background" | "abilities" | "feats" | "skills" | "spells" | "details" | "equipo" | "review";
 
 const STEPS: { id: Step; label: string }[] = [
   { id: "race", label: "Raza" },
   { id: "class", label: "Clase" },
   { id: "background", label: "Trasfondo" },
   { id: "abilities", label: "Atributos" },
+  { id: "feats", label: "Mejoras" },
   { id: "skills", label: "Habilidades" },
   { id: "spells", label: "Conjuros" },
   { id: "details", label: "Detalles" },
@@ -45,12 +49,25 @@ const STEPS: { id: Step; label: string }[] = [
 type AbilityMethod = "standard" | "pointbuy" | "roll";
 type MoneyMethod = "fixed" | "rolled";
 
+// ASI vs dote a los niveles 4/8/12/16/19 (más 6/14 guerrero, 10 pícaro). PHB p. 15 y tablas de clase.
+// - kind "none": slot sin decidir (inválido para avanzar).
+// - kind "asi":   `picks` = [ability] para +2 al mismo atributo, o [a1, a2] distintos para +1 cada uno.
+// - kind "feat":  selecciona un `featId`. Si la dote da +1 a elección de varios atributos, `abilityChoice` lo indica.
+export type AsiChoice =
+  | { kind: "none" }
+  | { kind: "asi"; picks: Ability[] }
+  | { kind: "feat"; featId: string; abilityChoice?: Ability };
+
 export function CharacterWizard() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("race");
   const [race, setRace] = useState<RaceBasics | null>(null);
   const [variantId, setVariantId] = useState<string>("");
   const [halfElfBonus, setHalfElfBonus] = useState<Ability[]>([]);
+  const [customAbilityPicks, setCustomAbilityPicks] = useState<Ability[]>([]);
+  const [chosenFeats, setChosenFeats] = useState<string[]>([]);
+  const [featAbilityChoices, setFeatAbilityChoices] = useState<Record<string, Ability>>({});
+  const [asiChoices, setAsiChoices] = useState<AsiChoice[]>([]);
   const [klass, setKlass] = useState<ClassBasics | null>(null);
   const [background, setBackground] = useState<BackgroundBasics | null>(null);
   const [method, setMethod] = useState<AbilityMethod>("standard");
@@ -81,6 +98,8 @@ export function CharacterWizard() {
     return race.variants.find((v) => v.id === variantId) ?? null;
   }, [race, variantId]);
 
+  const customAbilityRule = variant?.customAbilityBonus ?? race?.customAbilityBonus ?? null;
+
   const racialBonus = useMemo(() => {
     const bonus: Partial<Record<Ability, number>> = { ...(race?.abilityBonus ?? {}) };
     if (variant?.abilityBonus) {
@@ -91,8 +110,38 @@ export function CharacterWizard() {
     if (race?.id === "semielfo") {
       for (const a of halfElfBonus) bonus[a] = (bonus[a] ?? 0) + 1;
     }
+    if (customAbilityRule && customAbilityPicks.length > 0) {
+      for (const a of customAbilityPicks) bonus[a] = (bonus[a] ?? 0) + customAbilityRule.value;
+    }
+    for (const featId of chosenFeats) {
+      const feat = FEATS.find((f) => f.id === featId);
+      if (!feat?.abilityBonus) continue;
+      const ab = feat.abilityBonus.from.length === 1
+        ? feat.abilityBonus.from[0]
+        : featAbilityChoices[featId];
+      if (!ab) continue;
+      bonus[ab] = (bonus[ab] ?? 0) + feat.abilityBonus.value;
+    }
+    for (const choice of asiChoices) {
+      if (choice.kind === "asi") {
+        if (choice.picks.length === 1) {
+          bonus[choice.picks[0]] = (bonus[choice.picks[0]] ?? 0) + 2;
+        } else if (choice.picks.length === 2) {
+          bonus[choice.picks[0]] = (bonus[choice.picks[0]] ?? 0) + 1;
+          bonus[choice.picks[1]] = (bonus[choice.picks[1]] ?? 0) + 1;
+        }
+      } else if (choice.kind === "feat") {
+        const feat = FEATS.find((f) => f.id === choice.featId);
+        if (!feat?.abilityBonus) continue;
+        const ab = feat.abilityBonus.from.length === 1
+          ? feat.abilityBonus.from[0]
+          : choice.abilityChoice;
+        if (!ab) continue;
+        bonus[ab] = (bonus[ab] ?? 0) + feat.abilityBonus.value;
+      }
+    }
     return bonus;
-  }, [race, variant, halfElfBonus]);
+  }, [race, variant, halfElfBonus, customAbilityRule, customAbilityPicks, chosenFeats, featAbilityChoices, asiChoices]);
 
   const effective = useMemo(() => {
     const e: Record<Ability, number> = { ...abilities };
@@ -114,7 +163,18 @@ export function CharacterWizard() {
 
   const extraLanguageCount =
     (race?.bonusLanguages ?? 0) + (variant?.bonusLanguages ?? 0) + (background?.languages ?? 0);
-  const racialBonusSkills = race?.bonusSkills ?? 0;
+  const racialBonusSkills = (race?.bonusSkills ?? 0) + (variant?.bonusSkills ?? 0);
+  const featSlots = (race?.bonusFeats ?? 0) + (variant?.bonusFeats ?? 0);
+  const asiSlots = klass ? asiCountForClassAtLevel(klass.id, level) : 0;
+  const featsStepVisible = featSlots > 0 || asiSlots > 0;
+
+  useEffect(() => {
+    setAsiChoices((prev) => {
+      if (prev.length === asiSlots) return prev;
+      if (asiSlots < prev.length) return prev.slice(0, asiSlots);
+      return [...prev, ...Array.from({ length: asiSlots - prev.length }, () => ({ kind: "none" } as AsiChoice))];
+    });
+  }, [asiSlots]);
 
   const cantripsExpected = klass?.spellcasting?.cantripsKnown ?? 0;
   const spellsExpected = klass?.spellcasting
@@ -238,20 +298,29 @@ export function CharacterWizard() {
             slots: {},
           },
       features: [{ name: background.feature.name, source: background.label, text: background.feature.text }],
+      feats: [
+        ...chosenFeats,
+        ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
+      ],
     };
     const res = await fetch("/api/character", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = (await res.json()) as { id: string };
     router.push(`/character/${data.id}`);
   }
 
+  function isSkipped(id: Step) {
+    if (id === "spells" && !spellsStepVisible) return true;
+    if (id === "feats" && !featsStepVisible) return true;
+    return false;
+  }
   function goNext() {
     let idx = Math.min(STEPS.length - 1, stepIdx + 1);
-    while (STEPS[idx].id === "spells" && !spellsStepVisible && idx < STEPS.length - 1) idx += 1;
+    while (isSkipped(STEPS[idx].id) && idx < STEPS.length - 1) idx += 1;
     setStep(STEPS[idx].id);
   }
   function goPrev() {
     let idx = Math.max(0, stepIdx - 1);
-    while (STEPS[idx].id === "spells" && !spellsStepVisible && idx > 0) idx -= 1;
+    while (isSkipped(STEPS[idx].id) && idx > 0) idx -= 1;
     setStep(STEPS[idx].id);
   }
 
@@ -260,12 +329,35 @@ export function CharacterWizard() {
       if (!race) return true;
       if (race.variants && race.variants.length > 0 && !variantId) return true;
       if (race.id === "semielfo" && halfElfBonus.length !== 2) return true;
+      if (customAbilityRule && customAbilityPicks.length !== customAbilityRule.count) return true;
       return false;
     }
     if (step === "class") return !klass;
     if (step === "background") {
       if (!background) return true;
       if (chosenLanguages.length !== extraLanguageCount) return true;
+      return false;
+    }
+    if (step === "feats") {
+      if (!featsStepVisible) return false;
+      if (chosenFeats.length !== featSlots) return true;
+      for (const featId of chosenFeats) {
+        const feat = FEATS.find((f) => f.id === featId);
+        if (feat?.abilityBonus && feat.abilityBonus.from.length > 1 && !featAbilityChoices[featId]) return true;
+      }
+      if (asiChoices.length !== asiSlots) return true;
+      for (const ch of asiChoices) {
+        if (ch.kind === "none") return true;
+        if (ch.kind === "asi") {
+          if (ch.picks.length === 0) return true;
+          if (ch.picks.length > 2) return true;
+          if (ch.picks.length === 2 && ch.picks[0] === ch.picks[1]) return true;
+        } else if (ch.kind === "feat") {
+          const feat = FEATS.find((f) => f.id === ch.featId);
+          if (!feat) return true;
+          if (feat.abilityBonus && feat.abilityBonus.from.length > 1 && !ch.abilityChoice) return true;
+        }
+      }
       return false;
     }
     if (step === "skills" && klass) {
@@ -294,7 +386,7 @@ export function CharacterWizard() {
   return (
     <div>
       <Stepper
-        steps={STEPS.filter((s) => s.id !== "spells" || spellsStepVisible)}
+        steps={STEPS.filter((s) => !isSkipped(s.id))}
         currentId={step}
         onGo={(s) => setStep(s.id)}
       />
@@ -309,6 +401,9 @@ export function CharacterWizard() {
                 setChosenLanguages([]);
                 setBonusSkills([]);
                 setChosenRacialCantrip([]);
+                setCustomAbilityPicks([]);
+                setChosenFeats([]);
+                setFeatAbilityChoices({});
                 if (r.id !== "semielfo") setHalfElfBonus([]);
               }}
               variantId={variantId}
@@ -316,9 +411,15 @@ export function CharacterWizard() {
                 setVariantId(id);
                 setChosenLanguages([]);
                 setChosenRacialCantrip([]);
+                setCustomAbilityPicks([]);
+                setChosenFeats([]);
+                setFeatAbilityChoices({});
               }}
               halfElfBonus={halfElfBonus}
               setHalfElfBonus={setHalfElfBonus}
+              customAbilityRule={customAbilityRule}
+              customAbilityPicks={customAbilityPicks}
+              setCustomAbilityPicks={setCustomAbilityPicks}
             />
           )}
           {step === "class" && (
@@ -356,6 +457,26 @@ export function CharacterWizard() {
               race={race}
             />
           )}
+          {step === "feats" && (
+            <FeatsStep
+              slots={featSlots}
+              chosen={chosenFeats}
+              setChosen={(ids) => {
+                setChosenFeats(ids);
+                setFeatAbilityChoices((prev) => {
+                  const next = { ...prev };
+                  for (const id of Object.keys(next)) if (!ids.includes(id)) delete next[id];
+                  return next;
+                });
+              }}
+              abilityChoices={featAbilityChoices}
+              setAbilityChoices={setFeatAbilityChoices}
+              asiSlots={asiSlots}
+              asiChoices={asiChoices}
+              setAsiChoices={setAsiChoices}
+              asiLevels={klass ? asiLevelsForClass(klass.id, level) : []}
+            />
+          )}
           {step === "skills" && (
             <SkillsStep
               klass={klass}
@@ -363,8 +484,10 @@ export function CharacterWizard() {
               skills={skills}
               setSkills={setSkills}
               race={race}
+              variant={variant}
               bonusSkills={bonusSkills}
               setBonusSkills={setBonusSkills}
+              racialBonusSkills={racialBonusSkills}
             />
           )}
           {step === "spells" && (
@@ -434,6 +557,10 @@ export function CharacterWizard() {
               money={buildMoney()}
               skills={mergeUnique(skills, bonusSkills)}
               languages={mergeUnique(mergeUnique(race?.languages ?? [], variant?.extraLanguages), chosenLanguages)}
+              feats={[
+                ...chosenFeats,
+                ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
+              ]}
               spells={buildKnownSpells({
                 chosenCantrips,
                 chosenSpells,
@@ -557,6 +684,9 @@ function RaceStep({
   onPickVariant,
   halfElfBonus,
   setHalfElfBonus,
+  customAbilityRule,
+  customAbilityPicks,
+  setCustomAbilityPicks,
 }: {
   race: RaceBasics | null;
   onPick: (r: RaceBasics) => void;
@@ -564,6 +694,9 @@ function RaceStep({
   onPickVariant: (id: string) => void;
   halfElfBonus: Ability[];
   setHalfElfBonus: (a: Ability[]) => void;
+  customAbilityRule: { count: number; value: number; excludes?: Ability[] } | null;
+  customAbilityPicks: Ability[];
+  setCustomAbilityPicks: (a: Ability[]) => void;
 }) {
   const toggleHalfElf = (a: Ability) => {
     if (a === "car") return;
@@ -574,6 +707,17 @@ function RaceStep({
       next.add(a);
     }
     setHalfElfBonus(Array.from(next));
+  };
+  const toggleCustom = (a: Ability) => {
+    if (!customAbilityRule) return;
+    if (customAbilityRule.excludes?.includes(a)) return;
+    const next = new Set(customAbilityPicks);
+    if (next.has(a)) next.delete(a);
+    else {
+      if (next.size >= customAbilityRule.count) return;
+      next.add(a);
+    }
+    setCustomAbilityPicks(Array.from(next));
   };
   return (
     <div>
@@ -663,6 +807,35 @@ function RaceStep({
                 >
                   <span className="label uppercase">{a}</span>
                   <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleHalfElf(a)} />
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {customAbilityRule && (
+        <div className="mt-5 card">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="label">
+              Elige {customAbilityRule.count} atributo{customAbilityRule.count === 1 ? "" : "s"} distinto{customAbilityRule.count === 1 ? "" : "s"} para aplicar +{customAbilityRule.value}
+            </p>
+            <span className="badge" style={{ color: customAbilityPicks.length === customAbilityRule.count ? "var(--color-accent)" : undefined }}>
+              {customAbilityPicks.length}/{customAbilityRule.count}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+            {(ABILITIES as readonly Ability[]).map((a) => {
+              const excluded = customAbilityRule.excludes?.includes(a) ?? false;
+              const checked = customAbilityPicks.includes(a);
+              const disabled = excluded || (!checked && customAbilityPicks.length >= customAbilityRule.count);
+              return (
+                <label
+                  key={a}
+                  className={checked ? "card-accent flex items-center justify-between py-2" : "card flex items-center justify-between py-2"}
+                  style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
+                >
+                  <span className="label uppercase">{a}</span>
+                  <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleCustom(a)} />
                 </label>
               );
             })}
@@ -965,16 +1138,20 @@ function SkillsStep({
   skills,
   setSkills,
   race,
+  variant,
   bonusSkills,
   setBonusSkills,
+  racialBonusSkills,
 }: {
   klass: ClassBasics | null;
   bg: BackgroundBasics | null;
   skills: string[];
   setSkills: (s: string[]) => void;
   race: RaceBasics | null;
+  variant: RaceVariant | null;
   bonusSkills: string[];
   setBonusSkills: (s: string[]) => void;
+  racialBonusSkills: number;
 }) {
   const bgSkills = new Set(bg?.skillProficiencies ?? []);
   const classList = new Set(klass?.skillChoices.from ?? []);
@@ -982,7 +1159,7 @@ function SkillsStep({
   const classPicks = skills.filter((s) => !bgSkills.has(s));
   const limit = klass?.skillChoices.count ?? 0;
   const remaining = Math.max(0, limit - classPicks.length);
-  const racialBonusSkills = race?.bonusSkills ?? 0;
+  const bonusSource = variant?.bonusSkills ? (variant.label ?? race?.label) : race?.label;
 
   const toggle = (key: string) => {
     if (bgSkills.has(key)) return;
@@ -1060,7 +1237,7 @@ function SkillsStep({
         <div className="mt-6">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-              Versatilidad de habilidades ({race?.label}): elige {racialBonusSkills} habilidades adicionales a tu elección.
+              Versatilidad de habilidades ({bonusSource}): elige {racialBonusSkills} habilidad{racialBonusSkills === 1 ? "" : "es"} adicional{racialBonusSkills === 1 ? "" : "es"} a tu elección.
             </p>
             <span className="badge" style={{ color: bonusPicksRemaining === 0 ? "var(--color-accent)" : undefined }}>
               {bonusSkills.length}/{racialBonusSkills}
@@ -1351,6 +1528,7 @@ function ReviewStep({
   money,
   skills,
   languages,
+  feats,
   spells,
 }: {
   race: RaceBasics | null;
@@ -1368,8 +1546,12 @@ function ReviewStep({
   money: { cp: number; sp: number; ep: number; gp: number; pp: number };
   skills: string[];
   languages: string[];
+  feats: string[];
   spells: { name: string; level: number; prepared: boolean }[];
 }) {
+  const featRecords = feats
+    .map((id) => FEATS.find((f) => f.id === id))
+    .filter((f): f is Feat => f != null);
   return (
     <div className="space-y-4">
       <div className="card">
@@ -1409,6 +1591,22 @@ function ReviewStep({
         <p className="label mb-2">Idiomas</p>
         <p className="text-sm">{languages.length ? languages.join(", ") : "—"}</p>
       </div>
+
+      {featRecords.length > 0 && (
+        <div className="card">
+          <p className="label mb-2">Dotes</p>
+          <ul className="space-y-3 text-sm">
+            {featRecords.map((f) => (
+              <li key={f.id}>
+                <p><strong>{f.name}</strong></p>
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                  {f.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {spells.length > 0 && (
         <div className="card">
@@ -1709,6 +1907,415 @@ function SpellGrid({
           </label>
         );
       })}
+    </div>
+  );
+}
+
+function FeatsStep({
+  slots,
+  chosen,
+  setChosen,
+  abilityChoices,
+  setAbilityChoices,
+  asiSlots,
+  asiChoices,
+  setAsiChoices,
+  asiLevels,
+}: {
+  slots: number;
+  chosen: string[];
+  setChosen: (ids: string[]) => void;
+  abilityChoices: Record<string, Ability>;
+  setAbilityChoices: (v: Record<string, Ability>) => void;
+  asiSlots: number;
+  asiChoices: AsiChoice[];
+  setAsiChoices: (v: AsiChoice[] | ((prev: AsiChoice[]) => AsiChoice[])) => void;
+  asiLevels: number[];
+}) {
+  const toggle = (id: string) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id);
+    else {
+      if (next.size >= slots) return;
+      next.add(id);
+    }
+    setChosen(Array.from(next));
+  };
+  const pickAbility = (featId: string, ab: Ability) => {
+    setAbilityChoices({ ...abilityChoices, [featId]: ab });
+  };
+  const full = chosen.length >= slots;
+  const reservedFeatIds = new Set(asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])));
+  const usedRacialFeatIds = new Set(chosen);
+
+  const updateAsi = (idx: number, next: AsiChoice) => {
+    setAsiChoices((prev) => {
+      const copy = [...prev];
+      copy[idx] = next;
+      return copy;
+    });
+  };
+  return (
+    <div className="space-y-8">
+      {slots > 0 && (
+        <section className="space-y-4">
+          <div className="card">
+            <div className="flex items-center justify-between">
+              <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                Tu raza te concede {slots} dote{slots === 1 ? "" : "s"} inicial{slots === 1 ? "" : "es"} (PHB cap. 6).
+                Cada dote con ASI parcial (+1 a un atributo a elección) requiere que elijas el atributo beneficiado.
+              </p>
+              <span className="badge" style={{ color: full ? "var(--color-accent)" : undefined }}>
+                {chosen.length}/{slots}
+              </span>
+            </div>
+          </div>
+          <FeatList
+            title="Dote racial"
+            selectedIds={chosen}
+            disabledIds={reservedFeatIds}
+            onToggle={toggle}
+            full={full}
+            abilityChoices={abilityChoices}
+            pickAbility={pickAbility}
+          />
+        </section>
+      )}
+
+      {asiSlots > 0 && (
+        <section className="space-y-4">
+          <div className="card">
+            <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+              Tu clase te concede {asiSlots} mejora{asiSlots === 1 ? "" : "s"} de atributo o dote (niveles{" "}
+              {asiLevels.join(", ")}) — PHB tablas de clase cap. 3. Para cada mejora elige entre subir atributos o
+              canjearla por una dote.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4">
+            {asiChoices.map((choice, idx) => (
+              <AsiSlot
+                key={idx}
+                idx={idx}
+                level={asiLevels[idx]}
+                value={choice}
+                onChange={(next) => updateAsi(idx, next)}
+                reservedRacial={usedRacialFeatIds}
+                reservedOtherSlots={
+                  new Set(
+                    asiChoices
+                      .filter((_, i) => i !== idx)
+                      .flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function FeatList({
+  title,
+  selectedIds,
+  disabledIds,
+  onToggle,
+  full,
+  abilityChoices,
+  pickAbility,
+}: {
+  title: string;
+  selectedIds: string[];
+  disabledIds: Set<string>;
+  onToggle: (id: string) => void;
+  full: boolean;
+  abilityChoices: Record<string, Ability>;
+  pickAbility: (featId: string, ab: Ability) => void;
+}) {
+  return (
+    <div>
+      <p className="label mb-3">{title}</p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {FEATS.map((feat) => {
+          const picked = selectedIds.includes(feat.id);
+          const reservedElsewhere = !picked && disabledIds.has(feat.id);
+          const disabled = reservedElsewhere || (!picked && full);
+          const needsAbilityChoice = feat.abilityBonus && feat.abilityBonus.from.length > 1;
+          const chosenAbility = abilityChoices[feat.id];
+          return (
+            <div
+              key={feat.id}
+              className={picked ? "card-accent" : "card"}
+              style={{ opacity: disabled ? 0.55 : 1, padding: "14px 16px" }}
+            >
+              <label
+                className="flex items-start justify-between gap-3"
+                style={{ cursor: disabled ? "not-allowed" : "pointer" }}
+              >
+                <div className="flex-1">
+                  <p className="text-sm">
+                    <strong>{feat.name}</strong>
+                    {feat.prerequisite && (
+                      <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                        Req: {feat.prerequisite}
+                      </span>
+                    )}
+                    {reservedElsewhere && (
+                      <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                        · ya asignada en otra mejora
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    {feat.summary}
+                  </p>
+                </div>
+                <input type="checkbox" checked={picked} disabled={disabled} onChange={() => onToggle(feat.id)} />
+              </label>
+              {picked && (
+                <ul className="mt-3 space-y-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                  {feat.grants.map((line, i) => (
+                    <li key={i}>· {line}</li>
+                  ))}
+                </ul>
+              )}
+              {picked && needsAbilityChoice && feat.abilityBonus && (
+                <div className="mt-3">
+                  <p className="label mb-2">Elige el atributo a +{feat.abilityBonus.value}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {feat.abilityBonus.from.map((ab) => (
+                      <button
+                        key={ab}
+                        onClick={() => pickAbility(feat.id, ab)}
+                        className={chosenAbility === ab ? "btn-accent" : "btn-ghost"}
+                        style={{ padding: "4px 10px", fontSize: 12 }}
+                      >
+                        {ABILITY_LABEL[ab]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AsiSlot({
+  idx,
+  level,
+  value,
+  onChange,
+  reservedRacial,
+  reservedOtherSlots,
+}: {
+  idx: number;
+  level?: number;
+  value: AsiChoice;
+  onChange: (next: AsiChoice) => void;
+  reservedRacial: Set<string>;
+  reservedOtherSlots: Set<string>;
+}) {
+  const setKind = (kind: "asi" | "feat") => {
+    if (kind === "asi") onChange({ kind: "asi", picks: [] });
+    else onChange({ kind: "feat", featId: "" });
+  };
+  const toggleAsiPick = (ab: Ability) => {
+    if (value.kind !== "asi") return;
+    const picks = value.picks;
+    if (picks.length === 1 && picks[0] === ab) {
+      // Doble click: alterna de "+2 a uno" a vacío.
+      onChange({ kind: "asi", picks: [] });
+      return;
+    }
+    if (picks.length === 2 && picks.includes(ab)) {
+      onChange({ kind: "asi", picks: picks.filter((p) => p !== ab) });
+      return;
+    }
+    if (picks.length === 0) {
+      onChange({ kind: "asi", picks: [ab] });
+      return;
+    }
+    if (picks.length === 1) {
+      if (picks[0] === ab) onChange({ kind: "asi", picks: [ab, ab] });
+      else onChange({ kind: "asi", picks: [picks[0], ab] });
+      return;
+    }
+    // picks.length === 2 y no incluye ab: reemplaza el primero.
+    onChange({ kind: "asi", picks: [picks[1], ab] });
+  };
+  const upgradeSingleToDouble = () => {
+    if (value.kind !== "asi" || value.picks.length !== 1) return;
+    onChange({ kind: "asi", picks: [value.picks[0], value.picks[0]] });
+  };
+  const pickFeat = (featId: string) => {
+    onChange({ kind: "feat", featId, abilityChoice: undefined });
+  };
+  const pickFeatAbility = (ab: Ability) => {
+    if (value.kind !== "feat") return;
+    onChange({ ...value, abilityChoice: ab });
+  };
+
+  const asiSummary =
+    value.kind === "asi"
+      ? value.picks.length === 0
+        ? "Elige uno o dos atributos"
+        : value.picks.length === 1
+        ? `+1 a ${ABILITY_LABEL[value.picks[0]]} (puedes duplicar para +2)`
+        : value.picks[0] === value.picks[1]
+        ? `+2 a ${ABILITY_LABEL[value.picks[0]]}`
+        : `+1 a ${ABILITY_LABEL[value.picks[0]]} y +1 a ${ABILITY_LABEL[value.picks[1]]}`
+      : "";
+
+  return (
+    <div className="card" style={{ padding: "16px 18px" }}>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm">
+          <strong>Mejora {idx + 1}</strong>
+          {typeof level === "number" && (
+            <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+              · nivel {level}
+            </span>
+          )}
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setKind("asi")}
+            className={value.kind === "asi" ? "btn-accent" : "btn-ghost"}
+            style={{ padding: "4px 10px", fontSize: 12 }}
+          >
+            Subir atributos
+          </button>
+          <button
+            onClick={() => setKind("feat")}
+            className={value.kind === "feat" ? "btn-accent" : "btn-ghost"}
+            style={{ padding: "4px 10px", fontSize: 12 }}
+          >
+            Dote
+          </button>
+        </div>
+      </div>
+
+      {value.kind === "none" && (
+        <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+          Elige una opción: subir atributos (+2 a uno o +1 a dos) o canjear por una dote.
+        </p>
+      )}
+
+      {value.kind === "asi" && (
+        <div>
+          <p className="label mb-2">Elige +2 a uno o +1 a dos atributos</p>
+          <div className="flex flex-wrap gap-2">
+            {ABILITIES.map((ab) => {
+              const count = value.picks.filter((p) => p === ab).length;
+              return (
+                <button
+                  key={ab}
+                  onClick={() => toggleAsiPick(ab)}
+                  className={count > 0 ? "btn-accent" : "btn-ghost"}
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                >
+                  {ABILITY_LABEL[ab]}
+                  {count > 0 && <span className="ml-1">+{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          {value.picks.length === 1 && (
+            <button
+              onClick={upgradeSingleToDouble}
+              className="btn-ghost mt-3"
+              style={{ padding: "4px 10px", fontSize: 12 }}
+            >
+              Concentrar en +2 a {ABILITY_LABEL[value.picks[0]]}
+            </button>
+          )}
+          <p className="mt-3 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+            {asiSummary}
+          </p>
+        </div>
+      )}
+
+      {value.kind === "feat" && (
+        <div>
+          <p className="label mb-2">Elige una dote</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {FEATS.map((feat) => {
+              const reservedAsRacial = reservedRacial.has(feat.id);
+              const reservedElsewhere = reservedOtherSlots.has(feat.id);
+              const picked = value.featId === feat.id;
+              const disabled = !picked && (reservedAsRacial || reservedElsewhere);
+              const needsAbilityChoice = feat.abilityBonus && feat.abilityBonus.from.length > 1;
+              return (
+                <div
+                  key={feat.id}
+                  className={picked ? "card-accent" : "card"}
+                  style={{ opacity: disabled ? 0.55 : 1, padding: "12px 14px" }}
+                >
+                  <label
+                    className="flex items-start justify-between gap-3"
+                    style={{ cursor: disabled ? "not-allowed" : "pointer" }}
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm">
+                        <strong>{feat.name}</strong>
+                        {feat.prerequisite && (
+                          <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                            Req: {feat.prerequisite}
+                          </span>
+                        )}
+                        {(reservedAsRacial || reservedElsewhere) && (
+                          <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                            · ya asignada
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                        {feat.summary}
+                      </p>
+                    </div>
+                    <input
+                      type="radio"
+                      name={`asi-feat-${idx}`}
+                      checked={picked}
+                      disabled={disabled}
+                      onChange={() => pickFeat(feat.id)}
+                    />
+                  </label>
+                  {picked && (
+                    <ul className="mt-3 space-y-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                      {feat.grants.map((line, i) => (
+                        <li key={i}>· {line}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {picked && needsAbilityChoice && feat.abilityBonus && (
+                    <div className="mt-3">
+                      <p className="label mb-2">Elige el atributo a +{feat.abilityBonus.value}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feat.abilityBonus.from.map((ab) => (
+                          <button
+                            key={ab}
+                            onClick={() => pickFeatAbility(ab)}
+                            className={value.abilityChoice === ab ? "btn-accent" : "btn-ghost"}
+                            style={{ padding: "4px 10px", fontSize: 12 }}
+                          >
+                            {ABILITY_LABEL[ab]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
