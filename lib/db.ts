@@ -112,8 +112,10 @@ function migrate(db: Database.Database) {
       title TEXT,
       path TEXT NOT NULL,
       tags TEXT,
+      cache_key TEXT,
       created_at INTEGER NOT NULL
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_cache_key ON asset(cache_key) WHERE cache_key IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -133,6 +135,18 @@ function migrate(db: Database.Database) {
     );`);
   } catch {
     // sqlite-vec no disponible; RAG usará solo FTS
+  }
+
+  try {
+    const cols = db.prepare("PRAGMA table_info(asset)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "cache_key")) {
+      db.exec("ALTER TABLE asset ADD COLUMN cache_key TEXT");
+      db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_cache_key ON asset(cache_key) WHERE cache_key IS NOT NULL"
+      );
+    }
+  } catch {
+    // columna ya existía o motor no soporta ALTER; continuar
   }
 }
 

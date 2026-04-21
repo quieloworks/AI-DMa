@@ -18,6 +18,7 @@ import {
   pointBuyTotal,
   proficiencyBonus,
   spellSlotsFor,
+  wizardPreparedCount,
   type Ability,
   type BackgroundBasics,
   type ClassBasics,
@@ -64,6 +65,7 @@ export function CharacterWizard() {
   const [level, setLevel] = useState(1);
   const [chosenCantrips, setChosenCantrips] = useState<string[]>([]);
   const [chosenSpells, setChosenSpells] = useState<string[]>([]);
+  const [chosenPrepared, setChosenPrepared] = useState<string[]>([]);
   const [chosenRacialCantrip, setChosenRacialCantrip] = useState<string[]>([]);
   const [equipmentChoices, setEquipmentChoices] = useState<Record<string, string>>({});
   const [moneyMethod, setMoneyMethod] = useState<MoneyMethod>("fixed");
@@ -118,6 +120,14 @@ export function CharacterWizard() {
   const spellsExpected = klass?.spellcasting
     ? firstLevelSpellPicks(klass.spellcasting, level, effective[klass.spellcasting.ability])
     : 0;
+  // Mago: tras copiar `spellbookCount` al grimorio, prepara `nivel + mod INT` cada día (PHB p. 114).
+  const preparedExpected =
+    klass?.spellcasting?.preparation === "spellbook" && chosenSpells.length > 0
+      ? Math.min(
+          chosenSpells.length,
+          wizardPreparedCount(level, effective[klass.spellcasting.ability]),
+        )
+      : 0;
   const racialCantripChoice = variant?.cantripChoice ?? race?.cantripChoice ?? null;
   const spellsStepVisible =
     (Boolean(klass?.spellcasting) && (cantripsExpected > 0 || spellsExpected > 0)) ||
@@ -204,6 +214,7 @@ export function CharacterWizard() {
             known: buildKnownSpells({
               chosenCantrips,
               chosenSpells,
+              chosenPrepared,
               chosenRacialCantrip,
               grantedRacialCantrips: [
                 ...(race.grantedCantrips ?? []),
@@ -217,6 +228,7 @@ export function CharacterWizard() {
             known: buildKnownSpells({
               chosenCantrips: [],
               chosenSpells: [],
+              chosenPrepared: [],
               chosenRacialCantrip,
               grantedRacialCantrips: [
                 ...(race.grantedCantrips ?? []),
@@ -268,6 +280,7 @@ export function CharacterWizard() {
       if (chosenCantrips.length !== cantripsExpected) return true;
       if (chosenSpells.length !== spellsExpected) return true;
       if (racialCantripChoice && chosenRacialCantrip.length !== racialCantripChoice.count) return true;
+      if (preparedExpected > 0 && chosenPrepared.length !== preparedExpected) return true;
       return false;
     }
     if (step === "equipo") {
@@ -315,6 +328,7 @@ export function CharacterWizard() {
                 setKlass(c);
                 setChosenCantrips([]);
                 setChosenSpells([]);
+                setChosenPrepared([]);
               }}
             />
           )}
@@ -360,11 +374,17 @@ export function CharacterWizard() {
               variant={variant}
               cantripsExpected={cantripsExpected}
               spellsExpected={spellsExpected}
+              preparedExpected={preparedExpected}
               racialCantripChoice={racialCantripChoice}
               chosenCantrips={chosenCantrips}
               setChosenCantrips={setChosenCantrips}
               chosenSpells={chosenSpells}
-              setChosenSpells={setChosenSpells}
+              setChosenSpells={(ids) => {
+                setChosenSpells(ids);
+                setChosenPrepared((prev) => prev.filter((p) => ids.includes(p)));
+              }}
+              chosenPrepared={chosenPrepared}
+              setChosenPrepared={setChosenPrepared}
               chosenRacialCantrip={chosenRacialCantrip}
               setChosenRacialCantrip={setChosenRacialCantrip}
             />
@@ -417,6 +437,7 @@ export function CharacterWizard() {
               spells={buildKnownSpells({
                 chosenCantrips,
                 chosenSpells,
+                chosenPrepared,
                 chosenRacialCantrip,
                 grantedRacialCantrips: [
                   ...(race?.grantedCantrips ?? []),
@@ -1454,11 +1475,14 @@ function SpellsStep({
   variant,
   cantripsExpected,
   spellsExpected,
+  preparedExpected,
   racialCantripChoice,
   chosenCantrips,
   setChosenCantrips,
   chosenSpells,
   setChosenSpells,
+  chosenPrepared,
+  setChosenPrepared,
   chosenRacialCantrip,
   setChosenRacialCantrip,
 }: {
@@ -1467,11 +1491,14 @@ function SpellsStep({
   variant: RaceVariant | null;
   cantripsExpected: number;
   spellsExpected: number;
+  preparedExpected: number;
   racialCantripChoice: { fromClass: string; ability: Ability; count: number } | null;
   chosenCantrips: string[];
   setChosenCantrips: (s: string[]) => void;
   chosenSpells: string[];
   setChosenSpells: (s: string[]) => void;
+  chosenPrepared: string[];
+  setChosenPrepared: (s: string[]) => void;
   chosenRacialCantrip: string[];
   setChosenRacialCantrip: (s: string[]) => void;
 }) {
@@ -1565,6 +1592,28 @@ function SpellsStep({
             selected={chosenSpells}
             onToggle={(id) => toggleFrom(chosenSpells, setChosenSpells, spellsExpected, id)}
             max={spellsExpected}
+          />
+        </div>
+      )}
+
+      {preparation === "spellbook" && preparedExpected > 0 && chosenSpells.length === spellsExpected && (
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="label">
+              Preparados hoy (nivel + mod {spellsAbility ? ABILITY_LABEL[spellsAbility] : "INT"}): elige {preparedExpected} de tu grimorio
+            </p>
+            <span className="badge" style={{ color: chosenPrepared.length === preparedExpected ? "var(--color-accent)" : undefined }}>
+              {chosenPrepared.length}/{preparedExpected}
+            </span>
+          </div>
+          <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
+            El resto permanecen en tu libro sin preparar (PHB p. 114). Podrás cambiarlos tras un descanso largo.
+          </p>
+          <SpellGrid
+            spells={classSpells.filter((s) => chosenSpells.includes(s.id))}
+            selected={chosenPrepared}
+            onToggle={(id) => toggleFrom(chosenPrepared, setChosenPrepared, preparedExpected, id)}
+            max={preparedExpected}
           />
         </div>
       )}
@@ -1667,11 +1716,12 @@ function SpellGrid({
 function buildKnownSpells(params: {
   chosenCantrips: string[];
   chosenSpells: string[];
+  chosenPrepared: string[];
   chosenRacialCantrip: string[];
   grantedRacialCantrips: { spellId: string; ability: Ability }[];
   preparation?: "known" | "prepared" | "spellbook";
 }): { name: string; level: number; prepared: boolean }[] {
-  const { chosenCantrips, chosenSpells, chosenRacialCantrip, grantedRacialCantrips, preparation } = params;
+  const { chosenCantrips, chosenSpells, chosenPrepared, chosenRacialCantrip, grantedRacialCantrips, preparation } = params;
   const out: { name: string; level: number; prepared: boolean }[] = [];
   const seen = new Set<string>();
   const push = (spellId: string, prepared: boolean) => {
@@ -1684,11 +1734,16 @@ function buildKnownSpells(params: {
   for (const id of chosenCantrips) push(id, true);
   for (const id of chosenRacialCantrip) push(id, true);
   for (const g of grantedRacialCantrips) push(g.spellId, true);
-  // Para mago con grimorio: los 6 conjuros iniciales están en el libro pero aún no preparados.
-  // Al nivel 1 se puede preparar hasta `level + mod INT`; por simplicidad marcamos todos como preparados
-  // salvo el caso del mago, donde los dejamos como "no preparados" (el jugador ajustará después).
-  const spellsPrepared = preparation !== "spellbook";
-  for (const id of chosenSpells) push(id, spellsPrepared);
+  // Mago con grimorio (PHB p. 114): copia `spellbookCount` conjuros y prepara `nivel + mod INT`.
+  // Los marcados en `chosenPrepared` van como preparados; el resto queda en el libro (prepared: false).
+  // Clérigo, druida, paladín y lanzadores "known" (bardo, hechicero, brujo, explorador) van todos como
+  // preparados porque no llevan grimorio.
+  if (preparation === "spellbook") {
+    const preparedSet = new Set(chosenPrepared);
+    for (const id of chosenSpells) push(id, preparedSet.has(id));
+  } else {
+    for (const id of chosenSpells) push(id, true);
+  }
   return out;
 }
 

@@ -586,7 +586,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["sab", "car"],
     armorProficiencies: ["Todas las armaduras", "Escudos"],
     weaponProficiencies: ["Armas sencillas", "Armas marciales"],
-    spellcasting: { ability: "car", caster: "half", cantripsKnown: 0 },
+    spellcasting: { ability: "car", caster: "half", cantripsKnown: 0, preparation: "prepared" },
     skillChoices: { count: 2, from: PALADIN_SKILLS },
     startingEquipmentFixed: [
       { name: "Cota de malla", qty: 1 },
@@ -628,7 +628,7 @@ export const CLASSES: ClassBasics[] = [
     savingThrows: ["fue", "des"],
     armorProficiencies: ["Armadura ligera", "Armadura media", "Escudos"],
     weaponProficiencies: ["Armas sencillas", "Armas marciales"],
-    spellcasting: { ability: "sab", caster: "half", cantripsKnown: 0 },
+    spellcasting: { ability: "sab", caster: "half", cantripsKnown: 0, preparation: "known", spellsKnown: 2 },
     skillChoices: { count: 3, from: RANGER_SKILLS },
     startingEquipmentFixed: [
       { name: "Arco largo", qty: 1 },
@@ -1129,9 +1129,18 @@ export const SPELL_SLOTS_FULL_CASTER: Record<number, number[]> = {
   20: [4, 3, 3, 3, 3, 2, 2, 1, 1],
 };
 
+// PHB p. 91 (Ranger Spellcasting table). Índice = nivel de personaje.
+const RANGER_SPELLS_KNOWN: Record<number, number> = {
+  2: 2, 3: 3, 4: 3, 5: 4, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6,
+  11: 7, 12: 7, 13: 8, 14: 8, 15: 9, 16: 9, 17: 10, 18: 10, 19: 11, 20: 11,
+};
+
 // Número de conjuros de nivel 1+ que el personaje elige al crear ficha.
-// - "known"    → `spellcasting.spellsKnown` (bardo, hechicero, brujo).
-// - "prepared" → `level + mod(ability)` con mínimo 1 (clérigo, druida).
+// - "known"    → `spellcasting.spellsKnown` para lanzadores completos (bardo, hechicero, brujo).
+//                Para medio-lanzadores "conocidos" (explorador, PHB p. 91) usamos la tabla de la clase.
+// - "prepared" → `level + mod(ability)` con mínimo 1 para lanzadores completos (clérigo, druida).
+//                Para medio-lanzadores "preparados" (paladín, PHB p. 85) la fórmula es
+//                `floor(level/2) + mod CAR` mínimo 1, y no hay conjuros antes del nivel 2.
 // - "spellbook"→ `spellcasting.spellbookCount` (mago copia 6 conjuros en su grimorio al nivel 1).
 export function firstLevelSpellPicks(
   spellcasting: NonNullable<ClassBasics["spellcasting"]>,
@@ -1140,14 +1149,28 @@ export function firstLevelSpellPicks(
 ): number {
   switch (spellcasting.preparation) {
     case "known":
+      if (spellcasting.caster === "half") {
+        if (level < 2) return 0;
+        return RANGER_SPELLS_KNOWN[Math.min(20, level)] ?? 0;
+      }
       return spellcasting.spellsKnown ?? 0;
     case "spellbook":
       return spellcasting.spellbookCount ?? 0;
     case "prepared":
+      if (spellcasting.caster === "half") {
+        if (level < 2) return 0;
+        return Math.max(1, Math.floor(level / 2) + abilityMod(abilityScore));
+      }
       return Math.max(1, level + abilityMod(abilityScore));
     default:
       return 0;
   }
+}
+
+// Número de conjuros que el mago puede preparar al crear ficha (PHB p. 114).
+// `nivel + mod INT`, mínimo 1, acotado por lo que haya copiado en el grimorio.
+export function wizardPreparedCount(level: number, abilityScore: number): number {
+  return Math.max(1, level + abilityMod(abilityScore));
 }
 
 export function spellSlotsFor(caster: "full" | "half" | "third" | "pact", level: number) {

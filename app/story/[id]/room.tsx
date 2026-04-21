@@ -482,10 +482,17 @@ export function StoryRoom({
       ]
         .filter(Boolean)
         .join(" ");
+      const hintKey = (sceneHint || "ninguno").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48);
       const res = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, title: story.title, tags: ["historia", story.id, sceneHint, "escena"], size: "1536x1024" }),
+        body: JSON.stringify({
+          prompt,
+          title: story.title,
+          tags: ["historia", story.id, sceneHint, "escena"],
+          size: "1536x1024",
+          cacheKey: `story:${story.id}:scene:${hintKey}`,
+        }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "falló la generación");
@@ -513,7 +520,13 @@ export function StoryRoom({
       const res = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, title: `${story.title} · portada`, tags: ["historia", story.id, "portada"], size: "1536x1024" }),
+        body: JSON.stringify({
+          prompt,
+          title: `${story.title} · portada`,
+          tags: ["historia", story.id, "portada"],
+          size: "1536x1024",
+          cacheKey: `story:${story.id}:cover`,
+        }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) return;

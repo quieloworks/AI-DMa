@@ -10,6 +10,8 @@ export async function POST(req: NextRequest) {
     tags?: string[];
     size?: "512x512" | "1024x1024" | "1024x1536" | "1536x1024" | "1792x1024";
     style?: "vivid" | "natural";
+    cacheKey?: string;
+    force?: boolean;
   };
   if (!body.prompt) return NextResponse.json({ error: "prompt requerido" }, { status: 400 });
   try {
@@ -19,6 +21,8 @@ export async function POST(req: NextRequest) {
       tags: body.tags,
       size: body.size,
       style: body.style,
+      cacheKey: body.cacheKey,
+      force: body.force,
     });
     return NextResponse.json(result);
   } catch (err) {
