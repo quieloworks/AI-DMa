@@ -1,6 +1,7 @@
 import type { Server as IOServer, Socket } from "socket.io";
 import { getDb } from "@/lib/db";
 import { rollExpression, type DiceResult } from "./dice";
+import { serverT } from "@/lib/i18n/server";
 
 type JoinPayload = { sessionId: string; role: "dm" | "player"; playerId?: string; token?: string; name?: string };
 
@@ -44,8 +45,15 @@ function persistDiceRollChronicle(
 ) {
   if (by.role !== "player" || !sessionId) return;
   const label = by.label?.trim();
-  const req = requestId ? ` [petición ${requestId}]` : "";
-  const text = `🎲 Tirada: ${result.expression}${label ? ` (${label})` : ""}${req} → ${result.breakdown}. Total ${result.total}.`;
+  const labelPart = label ? serverT("system.diceChronicleLabel", { label }) : "";
+  const reqPart = requestId ? serverT("system.diceChronicleRequest", { id: requestId }) : "";
+  const text = serverT("system.diceChronicle", {
+    expression: result.expression,
+    labelPart,
+    reqPart,
+    breakdown: result.breakdown,
+    total: result.total,
+  });
   try {
     getDb()
       .prepare(
@@ -67,14 +75,14 @@ export function registerSocketHandlers(io: IOServer) {
       try {
         const db = getDb();
         const session = db.prepare<string, { id: string }>("SELECT id FROM session WHERE id = ?").get(payload.sessionId);
-        if (!session) return cb?.({ ok: false, error: "Sesión no existe" });
+        if (!session) return cb?.({ ok: false, error: serverT("errors.sessionNotFound") });
 
         if (payload.role === "player") {
-          if (!payload.playerId || !payload.token) return cb?.({ ok: false, error: "Falta token" });
+          if (!payload.playerId || !payload.token) return cb?.({ ok: false, error: serverT("errors.missingToken") });
           const row = db
             .prepare<[string, string], { token: string }>("SELECT token FROM session_player WHERE session_id = ? AND player_id = ?")
             .get(payload.sessionId, payload.playerId);
-          if (!row || row.token !== payload.token) return cb?.({ ok: false, error: "Token inválido" });
+          if (!row || row.token !== payload.token) return cb?.({ ok: false, error: serverT("errors.invalidToken") });
           db.prepare("UPDATE session_player SET connected = 1 WHERE session_id = ? AND player_id = ?").run(payload.sessionId, payload.playerId);
           socket.join(`player:${payload.sessionId}:${payload.playerId}`);
           boundPlayer = payload.playerId;

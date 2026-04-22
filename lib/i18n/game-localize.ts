@@ -1,5 +1,6 @@
 import type { Ability, FightingStyle } from "@/lib/character";
 import { ABILITY_LABEL, SKILLS } from "@/lib/character";
+import { ABILITY_ABBREV_EN } from "./overlays/en/labels";
 import type { RaceBasics, RaceVariant, BackgroundBasics, ClassBasics } from "@/lib/character";
 import type { SpellSchool } from "@/lib/spells";
 import type { AppLocale } from "./locale";
@@ -17,6 +18,13 @@ export function localizedAbilityLabel(ab: Ability, locale: AppLocale | undefined
   const l = normalizeLocale(locale);
   if (l === "es") return ABILITY_LABEL[ab];
   return ABILITY_LABEL_EN[ab];
+}
+
+/** Short STR/DEX… (EN) or FUE/DES… (ES) for compact grids. */
+export function localizedAbilityAbbrev(ab: Ability, locale: AppLocale | undefined): string {
+  const l = normalizeLocale(locale);
+  if (l === "es") return ab.toUpperCase();
+  return ABILITY_ABBREV_EN[ab];
 }
 
 export function localizedSkillLabel(skillKey: string, locale: AppLocale | undefined): string {

@@ -38,7 +38,7 @@ export function Shell({ children, active }: { children: ReactNode; active?: stri
             <div className="h-8 w-8 rounded-md" style={{ background: "var(--color-accent)" }} />
             <div className="flex flex-col leading-none">
               <span style={{ fontFamily: "var(--font-display)", fontSize: 20, letterSpacing: "-0.02em" }}>
-                Mesa
+                {tr("shell.brand")}
               </span>
               <span className="label">{tr("shell.subtitle")}</span>
             </div>

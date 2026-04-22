@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { chatComplete } from "@/server/providers/chat";
 import { generateImage } from "@/server/providers/image";
 import { synthesizeVoice } from "@/server/providers/voice";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -16,8 +17,8 @@ export async function POST(req: NextRequest) {
     if (target === "chat") {
       const out = await chatComplete(
         [
-          { role: "system", content: "Responde con una sola palabra." },
-          { role: "user", content: "Saluda en español." },
+          { role: "system", content: serverT("providersTest.chatSystem") },
+          { role: "user", content: serverT("providersTest.chatUser") },
         ],
         { maxTokens: 16 }
       );
@@ -28,12 +29,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, latencyMs: Date.now() - t0, url: res.url, provider: res.provider });
     }
     if (target === "voice") {
-      const res = await synthesizeVoice({ text: "Prueba de voz. Uno, dos, tres." });
+      const res = await synthesizeVoice({ text: serverT("providersTest.voiceSample") });
       if (res.kind === "fallback") return NextResponse.json({ ok: false, reason: res.reason }, { status: 400 });
       await res.body.cancel();
       return NextResponse.json({ ok: true, latencyMs: Date.now() - t0, contentType: res.contentType });
     }
-    return NextResponse.json({ ok: false, error: "target desconocido" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: serverT("errors.unknownTarget") }, { status: 400 });
   } catch (err) {
     return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 });
   }

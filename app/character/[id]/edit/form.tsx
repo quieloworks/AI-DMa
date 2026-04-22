@@ -2,10 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ABILITIES, ABILITY_LABEL, effectiveSpellKnownForCharacter, type Character } from "@/lib/character";
+import { ABILITIES, effectiveSpellKnownForCharacter, type Character } from "@/lib/character";
+import { useLocale, useTranslations } from "@/components/LocaleProvider";
+import { localizedAbilityLabel } from "@/lib/i18n/game-localize";
 
 export function EditCharacterForm({ character }: { character: Character }) {
   const router = useRouter();
+  const tr = useTranslations();
+  const locale = useLocale();
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Character>(() => ({
     ...character,
@@ -74,17 +78,17 @@ export function EditCharacterForm({ character }: { character: Character }) {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
       <div className="card space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Nombre">
+          <Field label={tr("characterEdit.form.name")}>
             <input className="input mt-2" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
           </Field>
-          <Field label="Jugador (real)">
+          <Field label={tr("characterEdit.form.playerName")}>
             <input
               className="input mt-2"
               value={draft.playerName ?? ""}
               onChange={(e) => patch({ playerName: e.target.value })}
             />
           </Field>
-          <Field label="Nivel">
+          <Field label={tr("characterEdit.form.level")}>
             <input
               type="number"
               className="input mt-2"
@@ -94,20 +98,20 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patch({ level: clampInt(e.target.value, 1, 20) })}
             />
           </Field>
-          <Field label="Raza">
+          <Field label={tr("characterEdit.form.race")}>
             <input className="input mt-2" value={draft.race} onChange={(e) => patch({ race: e.target.value })} />
           </Field>
-          <Field label="Clase">
+          <Field label={tr("characterEdit.form.class")}>
             <input className="input mt-2" value={draft.class} onChange={(e) => patch({ class: e.target.value })} />
           </Field>
-          <Field label="Trasfondo">
+          <Field label={tr("characterEdit.form.background")}>
             <input
               className="input mt-2"
               value={draft.background}
               onChange={(e) => patch({ background: e.target.value })}
             />
           </Field>
-          <Field label="Velocidad">
+          <Field label={tr("characterEdit.form.speed")}>
             <input
               type="number"
               className="input mt-2"
@@ -118,11 +122,11 @@ export function EditCharacterForm({ character }: { character: Character }) {
         </div>
 
         <div>
-          <p className="label mb-2">Atributos</p>
+          <p className="label mb-2">{tr("characterEdit.form.abilities")}</p>
           <div className="grid grid-cols-6 gap-2">
             {ABILITIES.map((a) => (
               <label key={a} className="block text-center">
-                <span className="label">{ABILITY_LABEL[a]}</span>
+                <span className="label">{localizedAbilityLabel(a, locale)}</span>
                 <input
                   type="number"
                   className="input mt-1 text-center"
@@ -135,7 +139,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Field label="HP máx.">
+          <Field label={tr("characterEdit.form.hpMax")}>
             <input
               type="number"
               className="input mt-2"
@@ -143,7 +147,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patchHp({ max: clampInt(e.target.value, 1, 999) })}
             />
           </Field>
-          <Field label="HP actual">
+          <Field label={tr("characterEdit.form.hpCurrent")}>
             <input
               type="number"
               className="input mt-2"
@@ -151,7 +155,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patchHp({ current: clampInt(e.target.value, -50, 999) })}
             />
           </Field>
-          <Field label="HP temp.">
+          <Field label={tr("characterEdit.form.hpTemp")}>
             <input
               type="number"
               className="input mt-2"
@@ -159,7 +163,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patchHp({ temp: clampInt(e.target.value, 0, 999) })}
             />
           </Field>
-          <Field label="CA (total en juego)">
+          <Field label={tr("characterEdit.form.acTotal")}>
             <input
               type="number"
               className="input mt-2"
@@ -167,10 +171,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
               onChange={(e) => patch({ ac: clampInt(e.target.value, 5, 30) })}
             />
           </Field>
-          <Field
-            label="Bonif. CA por objetos mágicos"
-            hint="Sólo anotación PHB (anillo de protección, armadura +1, etc.). Súmalo mentalmente a la CA base o inclúyelo ya en el campo CA."
-          >
+          <Field label={tr("characterEdit.form.acMagicBonus")} hint={tr("characterEdit.form.acMagicHint")}>
             <input
               type="number"
               className="input mt-2"
@@ -180,7 +181,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
           </Field>
         </div>
 
-        <Field label="Notas">
+        <Field label={tr("characterEdit.form.notes")}>
           <textarea
             className="input mt-2"
             style={{ height: 120, padding: 10 }}
@@ -191,10 +192,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
       </div>
 
       <div className="card space-y-4">
-        <Field
-          label="Inventario"
-          hint="Uno por línea. Formato: &quot;3x Flecha&quot; para cantidad, o el nombre tal cual."
-        >
+        <Field label={tr("characterEdit.form.inventory")} hint={tr("characterEdit.form.inventoryHint")}>
           <textarea
             className="input mt-2"
             style={{ height: 160, padding: 10 }}
@@ -203,10 +201,7 @@ export function EditCharacterForm({ character }: { character: Character }) {
           />
         </Field>
 
-        <Field
-          label="Conjuros conocidos"
-          hint="Uno por línea: nivel|nombre|* si está preparado (nivel 0 = truco)."
-        >
+        <Field label={tr("characterEdit.form.knownSpells")} hint={tr("characterEdit.form.knownSpellsHint")}>
           <textarea
             className="input mt-2"
             style={{ height: 120, padding: 10 }}
@@ -216,11 +211,11 @@ export function EditCharacterForm({ character }: { character: Character }) {
         </Field>
 
         <div>
-          <p className="label mb-2">Monedas</p>
+          <p className="label mb-2">{tr("characterEdit.form.moneyHeading")}</p>
           <div className="grid grid-cols-5 gap-2">
             {(["cp", "sp", "ep", "gp", "pp"] as const).map((k) => (
               <label key={k} className="block text-center">
-                <span className="label uppercase">{k}</span>
+                <span className="label uppercase">{tr(`pdf.sheet.${k}`)}</span>
                 <input
                   type="number"
                   className="input mt-1 text-center"
@@ -234,10 +229,10 @@ export function EditCharacterForm({ character }: { character: Character }) {
 
         <div className="flex gap-2 pt-2">
           <button className="btn-accent" onClick={save} disabled={saving}>
-            {saving ? "Guardando…" : "Guardar cambios"}
+            {saving ? tr("characterEdit.form.saving") : tr("characterEdit.form.save")}
           </button>
           <button className="btn-ghost" onClick={() => router.back()} disabled={saving}>
-            Cancelar
+            {tr("characterEdit.form.cancel")}
           </button>
         </div>
       </div>

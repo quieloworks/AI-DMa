@@ -1756,7 +1756,12 @@ function DetailsStep({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label className="block">
           <span className="label">{tr("wizard.details.characterName")}</span>
-          <input className="input mt-2" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Arannis Soldrake" />
+          <input
+            className="input mt-2"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={tr("wizard.details.namePlaceholder")}
+          />
         </label>
         <label className="block">
           <span className="label">{tr("wizard.details.playerName")}</span>
@@ -1764,7 +1769,7 @@ function DetailsStep({
             className="input mt-2"
             value={playerName}
             onChange={(e) => setPlayerName(e.target.value)}
-            placeholder="Ej: María López"
+            placeholder={tr("wizard.details.playerPlaceholder")}
           />
         </label>
         <label className="block">

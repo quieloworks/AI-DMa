@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type Player = {
   playerId: string;
@@ -24,16 +25,27 @@ export type BattleMap = {
   obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
 };
 
-const PALETTE: Record<string, { grid: string; bg: string; label: string }> = {
-  bosque: { grid: "#6b8e4e", bg: "#1e2a17", label: "Bosque" },
-  mazmorra: { grid: "#7a7164", bg: "#1a1512", label: "Mazmorra" },
-  taberna: { grid: "#a06a36", bg: "#241810", label: "Taberna" },
-  camino: { grid: "#8b7e68", bg: "#1f1b14", label: "Camino" },
-  ciudad: { grid: "#9a9ba5", bg: "#151720", label: "Ciudad" },
-  castillo: { grid: "#96877a", bg: "#181411", label: "Castillo" },
-  subterraneo: { grid: "#6f6a5c", bg: "#12100d", label: "Subterráneo" },
-  costa: { grid: "#7ca8bf", bg: "#0f1a22", label: "Costa" },
-  ninguno: { grid: "#7d6e59", bg: "#181511", label: "Escena" },
+type PaletteTerrainId =
+  | "bosque"
+  | "mazmorra"
+  | "taberna"
+  | "camino"
+  | "ciudad"
+  | "castillo"
+  | "subterraneo"
+  | "costa"
+  | "ninguno";
+
+const PALETTE: Record<PaletteTerrainId, { grid: string; bg: string }> = {
+  bosque: { grid: "#6b8e4e", bg: "#1e2a17" },
+  mazmorra: { grid: "#7a7164", bg: "#1a1512" },
+  taberna: { grid: "#a06a36", bg: "#241810" },
+  camino: { grid: "#8b7e68", bg: "#1f1b14" },
+  ciudad: { grid: "#9a9ba5", bg: "#151720" },
+  castillo: { grid: "#96877a", bg: "#181411" },
+  subterraneo: { grid: "#6f6a5c", bg: "#12100d" },
+  costa: { grid: "#7ca8bf", bg: "#0f1a22" },
+  ninguno: { grid: "#7d6e59", bg: "#181511" },
 };
 
 const KIND_COLORS: Record<BattleParticipant["kind"], { fill: string; stroke: string; ring: string }> = {
@@ -56,7 +68,12 @@ const OBSTACLE_COLORS: Record<string, { fill: string; stroke: string }> = {
 };
 
 function resolvePalette(hint: string | undefined) {
-  return PALETTE[hint ?? "ninguno"] ?? PALETTE.ninguno;
+  const id = (hint && hint in PALETTE ? hint : "ninguno") as PaletteTerrainId;
+  return PALETTE[id] ?? PALETTE.ninguno;
+}
+
+function terrainId(hint: string | undefined): PaletteTerrainId {
+  return (hint && hint in PALETTE ? hint : "ninguno") as PaletteTerrainId;
 }
 
 function setupCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
@@ -72,6 +89,7 @@ function setupCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D
 
 export function MapCanvas({ hint, players }: { hint: string; players: Player[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const tr = useTranslations();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -81,6 +99,7 @@ export function MapCanvas({ hint, players }: { hint: string; players: Player[] }
     const { ctx, w, h } = setup;
 
     const palette = resolvePalette(hint);
+    const terrainName = tr(`battleMap.palette.${terrainId(hint)}`);
     ctx.fillStyle = palette.bg;
     ctx.fillRect(0, 0, w, h);
 
@@ -127,8 +146,8 @@ export function MapCanvas({ hint, players }: { hint: string; players: Player[] }
     ctx.fillStyle = "rgba(244,239,230,0.4)";
     ctx.font = "italic 12px 'Instrument Serif', serif";
     ctx.textAlign = "left";
-    ctx.fillText(palette.label, 16, 22);
-  }, [hint, players]);
+    ctx.fillText(terrainName, 16, 22);
+  }, [hint, players, tr]);
 
   return <canvas ref={canvasRef} className="h-full w-full" style={{ display: "block", minHeight: 420 }} />;
 }
@@ -141,6 +160,7 @@ export function BattleMapCanvas({
   turn?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const tr = useTranslations();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -150,6 +170,7 @@ export function BattleMapCanvas({
     const { ctx, w, h } = setup;
 
     const palette = resolvePalette(battleMap.terrain);
+    const terrainName = tr(`battleMap.palette.${terrainId(battleMap.terrain)}`);
     const cols = Math.max(4, battleMap.grid.cols);
     const rows = Math.max(4, battleMap.grid.rows);
     const cellFeet = battleMap.grid.cellFeet ?? 5;
@@ -262,16 +283,17 @@ export function BattleMapCanvas({
     ctx.fillStyle = "rgba(244,239,230,0.65)";
     ctx.font = "italic 12px 'Instrument Serif', serif";
     ctx.textAlign = "left";
-    ctx.fillText(`⚔ Combate · ${palette.label}`, 16, 22);
+    ctx.fillText(tr("battleMap.combatBanner", { terrain: terrainName }), 16, 22);
     ctx.fillStyle = "rgba(244,239,230,0.45)";
     ctx.font = "10px 'Cabinet Grotesk', sans-serif";
-    ctx.fillText(`${cols}×${rows} · ${cellFeet} ft/celda${turn ? ` · turno ${turn}` : ""}`, 16, 38);
+    const turnPart = turn ? tr("battleMap.turnPart", { n: turn }) : "";
+    ctx.fillText(tr("battleMap.gridLine", { cols, rows, feet: cellFeet, turnPart }), 16, 38);
 
     const legend: Array<{ kind: BattleParticipant["kind"]; label: string }> = [
-      { kind: "player", label: "Jugador" },
-      { kind: "ally", label: "Aliado" },
-      { kind: "enemy", label: "Enemigo" },
-      { kind: "neutral", label: "Neutral" },
+      { kind: "player", label: tr("battleMap.legend.player") },
+      { kind: "ally", label: tr("battleMap.legend.ally") },
+      { kind: "enemy", label: tr("battleMap.legend.enemy") },
+      { kind: "neutral", label: tr("battleMap.legend.neutral") },
     ];
     const legendY = h - 18;
     let legendX = 16;
@@ -287,7 +309,7 @@ export function BattleMapCanvas({
       ctx.fillText(item.label, legendX + 12, legendY);
       legendX += ctx.measureText(item.label).width + 28;
     }
-  }, [battleMap, turn]);
+  }, [battleMap, turn, tr]);
 
   return <canvas ref={canvasRef} className="h-full w-full" style={{ display: "block", minHeight: 420 }} />;
 }

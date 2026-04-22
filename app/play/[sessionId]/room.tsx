@@ -6,7 +6,8 @@ import {
   canResolveDmDiceExpression,
   resolveDmDiceExpression,
 } from "@/lib/dm-dice-expression";
-import { useTranslations } from "@/components/LocaleProvider";
+import { useLocale, useTranslations } from "@/components/LocaleProvider";
+import { localizeGamePhrase, localizedAbilityAbbrev, localizedSkillLabel } from "@/lib/i18n/game-localize";
 
 type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
 
@@ -504,7 +505,9 @@ export function PlayRoom({
               <h2 style={{ fontSize: 18 }}>{picked.character?.name}</h2>
             </div>
             <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-              <span>HP {hp.current}/{hp.max}</span>
+              <span>
+                {tr("storyRoom.hp")} {hp.current}/{hp.max}
+              </span>
               <span>·</span>
               <span>
                 {tr("play.sheet.acAbbr")} {ac}
@@ -832,6 +835,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 
 function CharacterSheet({ data, level, prof }: { data: CharData; level: number; prof: number }) {
   const tr = useTranslations();
+  const locale = useLocale();
   const hp = data.hp ?? { current: 0, max: 0, temp: 0 };
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
   const racial = data.abilityRacialBonus ?? {};
@@ -840,7 +844,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
       <div className="card">
         <p className="label mb-2">{tr("play.sheet.vitals")}</p>
         <div className="grid grid-cols-4 gap-2">
-          <Stat label="HP" value={`${hp.current}/${hp.max}`} />
+          <Stat label={tr("storyRoom.hp")} value={`${hp.current}/${hp.max}`} />
           <Stat label={tr("play.sheet.acAbbr")} value={data.ac ?? 10} />
           <Stat label={tr("play.sheet.speedAbbr")} value={data.speed ?? 30} />
           <Stat label={tr("play.sheet.pbAbbr")} value={`+${prof}`} />
@@ -860,7 +864,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
             return (
               <div key={a} className="text-center">
                 <p className="label" style={{ fontSize: 9 }}>
-                  {a.toUpperCase()}
+                  {localizedAbilityAbbrev(a, locale)}
                 </p>
                 <p style={{ fontFamily: "var(--font-display)", fontSize: 16 }}>{total}</p>
                 <p className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
@@ -879,7 +883,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
             {(data.equipment ?? []).map((e, i) => (
               <li key={i}>
                 · {e.qty > 1 ? e.qty + " × " : ""}
-                {e.name}
+                {localizeGamePhrase(e.name, locale)}
                 {e.damage ? <span style={{ color: "var(--color-text-hint)" }}> · {e.damage}</span> : null}
               </li>
             ))}
@@ -900,7 +904,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
           <ul className="space-y-1 text-sm">
             {(data.spells?.known ?? []).map((s, i) => (
               <li key={i}>
-                · [{s.level}] {s.name} {s.prepared ? "✔" : ""}
+                · [{s.level}] {localizeGamePhrase(s.name, locale)} {s.prepared ? "✔" : ""}
               </li>
             ))}
           </ul>
@@ -926,6 +930,7 @@ function ActionsPanel({
   onAction: (text: string) => void;
 }) {
   const tr = useTranslations();
+  const locale = useLocale();
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
   const racial = data.abilityRacialBonus ?? {};
   const skills = data.skills ?? [];
@@ -938,8 +943,8 @@ function ActionsPanel({
     const mod = abilityMod(totalAbility(abilities, racial, ability)) + prof;
     onAction(
       tr("play.actionTrySkill", {
-        skill,
-        abl: ability.toUpperCase(),
+        skill: localizedSkillLabel(skill.toLowerCase(), locale),
+        abl: localizedAbilityAbbrev(ability, locale),
         mod: formatMod(mod),
       }),
     );
@@ -951,7 +956,7 @@ function ActionsPanel({
     const mod = base + (hasProf ? prof : 0);
     onAction(
       tr("play.actionSave", {
-        abl: ability.toUpperCase(),
+        abl: localizedAbilityAbbrev(ability, locale),
         mod: formatMod(mod),
         profSuffix: hasProf ? tr("play.actionSaveProfSuffix") : "",
       }),
@@ -977,11 +982,11 @@ function ActionsPanel({
   const castSpell = (s: { name: string; level: number }) => {
     const levelLabel =
       s.level === 0 ? tr("play.actionCastCantrip") : tr("play.actionCastLevel", { n: s.level });
-    onAction(tr("play.actionCastSpell", { name: s.name, levelLabel }));
+    onAction(tr("play.actionCastSpell", { name: localizeGamePhrase(s.name, locale), levelLabel }));
   };
 
   const useItem = (name: string) => {
-    onAction(tr("play.actionUseItem", { name }));
+    onAction(tr("play.actionUseItem", { name: localizeGamePhrase(name, locale) }));
   };
 
   return (
@@ -1026,7 +1031,7 @@ function ActionsPanel({
               return (
                 <ActionTile
                   key={i}
-                  label={tr("play.attackWith", { weapon: w.name })}
+                  label={tr("play.attackWith", { weapon: localizeGamePhrase(w.name, locale) })}
                   subtitle={tr("play.weaponSubtitle", {
                     mod: formatMod(mod),
                     dmgSuffix: w.damage ? tr("play.weaponDmgSuffix", { dmg: w.damage }) : "",
@@ -1046,7 +1051,7 @@ function ActionsPanel({
             {spells.map((s, i) => (
               <ActionTile
                 key={i}
-                label={tr("play.castSpellTile", { name: s.name })}
+                label={tr("play.castSpellTile", { name: localizeGamePhrase(s.name, locale) })}
                 subtitle={
                   s.level === 0
                     ? tr("play.spellCantrip")
@@ -1070,8 +1075,8 @@ function ActionsPanel({
             return (
               <ActionTile
                 key={s}
-                label={s}
-                subtitle={`${ab.toUpperCase()} ${formatMod(mod)}`}
+                label={localizedSkillLabel(s.toLowerCase(), locale)}
+                subtitle={`${localizedAbilityAbbrev(ab, locale)} ${formatMod(mod)}`}
                 onClick={() => rollSkill(s)}
               />
             );
@@ -1089,7 +1094,7 @@ function ActionsPanel({
             return (
               <ActionTile
                 key={a}
-                label={a.toUpperCase()}
+                label={localizedAbilityAbbrev(a, locale)}
                 subtitle={`${formatMod(mod)}${hasProf ? " ✓" : ""}`}
                 onClick={() => rollSave(a)}
               />
@@ -1105,7 +1110,7 @@ function ActionsPanel({
             {consumables.map((c, i) => (
               <ActionTile
                 key={i}
-                label={c.name}
+                label={localizeGamePhrase(c.name, locale)}
                 subtitle={c.qty > 1 ? `×${c.qty}` : tr("play.useConsumable")}
                 onClick={() => useItem(c.name)}
               />

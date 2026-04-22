@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type ProviderCatalogEntry = {
   id: string;
@@ -62,6 +63,7 @@ const KEY_PROVIDERS_FOR_VOICE: Record<string, KeyProvider | null> = {
 };
 
 export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
+  const tr = useTranslations();
   const [state, setState] = useState(initial);
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -124,14 +126,17 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
             detail: [
               data.latencyMs ? `${data.latencyMs}ms` : null,
               data.sample ? `→ ${data.sample}` : null,
-              data.url ? "imagen creada" : null,
+              data.url ? tr("settingsProviders.testImageCreated") : null,
             ]
               .filter(Boolean)
               .join(" · "),
           },
         }));
       } else {
-        setTestResult((prev) => ({ ...prev, [target]: { ok: false, detail: data.error ?? data.reason ?? "falló" } }));
+        setTestResult((prev) => ({
+          ...prev,
+          [target]: { ok: false, detail: data.error ?? data.reason ?? tr("settingsProviders.testFailed") },
+        }));
       }
     } catch (err) {
       setTestResult((prev) => ({ ...prev, [target]: { ok: false, detail: (err as Error).message } }));
@@ -154,8 +159,8 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
   return (
     <div className="space-y-6">
       <Section
-        title="Chat / narrativa"
-        description="Elige el cerebro que conduce al DM. Ollama corre en tu máquina; los demás necesitan API key."
+        title={tr("settingsProviders.section.chatTitle")}
+        description={tr("settingsProviders.section.chatDesc")}
         action={
           <TestButton
             ok={testResult.chat?.ok}
@@ -166,7 +171,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         }
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Proveedor">
+          <Field label={tr("settingsProviders.field.provider")}>
             <select
               className="input"
               value={state.config.chat.provider}
@@ -189,7 +194,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               ))}
             </select>
           </Field>
-          <Field label="Modelo">
+          <Field label={tr("settingsProviders.field.model")}>
             {chatCat?.models && chatCat.models.length > 0 ? (
               <div className="flex gap-2">
                 <select
@@ -210,7 +215,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
                 </select>
                 <input
                   className="input"
-                  placeholder="modelo custom"
+                  placeholder={tr("settingsProviders.placeholder.customModel")}
                   value={state.config.chat.model}
                   onChange={(e) =>
                     setState((prev) => ({ ...prev, config: { ...prev.config, chat: { ...prev.config.chat, model: e.target.value } } }))
@@ -227,7 +232,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               />
             )}
           </Field>
-          <Field label="Temperatura" help="0 = preciso · 1 = creativo">
+          <Field label={tr("settingsProviders.field.temperature")} help={tr("settingsProviders.field.temperatureHelp")}>
             <input
               className="input"
               type="number"
@@ -244,8 +249,10 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         {(state.config.chat.provider === "custom" || state.config.chat.provider === "ollama") && (
           <div className="mt-3">
             <Field
-              label={state.config.chat.provider === "custom" ? "Base URL (OpenAI-compatible)" : "Host de Ollama (opcional)"}
-              help={state.config.chat.provider === "custom" ? "https://mi-gateway/v1" : "http://127.0.0.1:11434 por defecto"}
+              label={
+                state.config.chat.provider === "custom" ? tr("settingsProviders.host.customBase") : tr("settingsProviders.host.ollama")
+              }
+              help={state.config.chat.provider === "custom" ? tr("settingsProviders.host.customHint") : tr("settingsProviders.host.ollamaHint")}
             >
               <input
                 className="input"
@@ -261,8 +268,8 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
       </Section>
 
       <Section
-        title="Imágenes de escena"
-        description="Para retratos, mapas y ambiente. Si está desactivado, la app usa el canvas procedural."
+        title={tr("settingsProviders.section.imageTitle")}
+        description={tr("settingsProviders.section.imageDesc")}
         action={
           <TestButton
             ok={testResult.image?.ok}
@@ -274,7 +281,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         }
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Proveedor">
+          <Field label={tr("settingsProviders.field.provider")}>
             <select
               className="input"
               value={state.config.image.provider}
@@ -297,7 +304,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               ))}
             </select>
           </Field>
-          <Field label="Modelo">
+          <Field label={tr("settingsProviders.field.model")}>
             <select
               className="input"
               value={state.config.image.model}
@@ -313,7 +320,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               ))}
             </select>
           </Field>
-          <Field label="Tamaño">
+          <Field label={tr("settingsProviders.field.size")}>
             <select
               className="input"
               value={state.config.image.size}
@@ -325,11 +332,11 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
                 }))
               }
             >
-              <option value="1024x1024">Cuadrado 1024²</option>
-              <option value="1024x1536">Retrato 1024×1536</option>
-              <option value="1536x1024">Paisaje 1536×1024</option>
-              <option value="1792x1024">Pano 1792×1024</option>
-              <option value="512x512">Bocetos 512²</option>
+              <option value="1024x1024">{tr("settingsProviders.imageSize.square")}</option>
+              <option value="1024x1536">{tr("settingsProviders.imageSize.portrait")}</option>
+              <option value="1536x1024">{tr("settingsProviders.imageSize.landscape")}</option>
+              <option value="1792x1024">{tr("settingsProviders.imageSize.pano")}</option>
+              <option value="512x512">{tr("settingsProviders.imageSize.sketch")}</option>
             </select>
           </Field>
         </div>
@@ -337,8 +344,8 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
       </Section>
 
       <Section
-        title="Voz narrada"
-        description="La voz del sistema (say / espeak-ng) es gratuita y no usa red. OpenAI/ElevenLabs ofrecen voces más expresivas."
+        title={tr("settingsProviders.section.voiceTitle")}
+        description={tr("settingsProviders.section.voiceDesc")}
         action={
           <TestButton
             ok={testResult.voice?.ok}
@@ -350,7 +357,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         }
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Proveedor">
+          <Field label={tr("settingsProviders.field.provider")}>
             <select
               className="input"
               value={state.config.voice.provider}
@@ -378,7 +385,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               ))}
             </select>
           </Field>
-          <Field label="Modelo">
+          <Field label={tr("settingsProviders.field.voiceModel")}>
             {voiceCat?.models && voiceCat.models.length > 0 ? (
               <select
                 className="input"
@@ -396,7 +403,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
             ) : (
               <input
                 className="input"
-                placeholder="(opcional)"
+                placeholder={tr("settingsProviders.optionalPlaceholder")}
                 value={state.config.voice.model}
                 onChange={(e) =>
                   setState((prev) => ({ ...prev, config: { ...prev.config, voice: { ...prev.config.voice, model: e.target.value } } }))
@@ -404,7 +411,15 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
               />
             )}
           </Field>
-          <Field label={state.config.voice.provider === "elevenlabs" ? "voice_id" : state.config.voice.provider === "openai" ? "Voz" : "Voz (sistema)"}>
+          <Field
+            label={
+              state.config.voice.provider === "elevenlabs"
+                ? tr("settingsProviders.field.voiceId")
+                : state.config.voice.provider === "openai"
+                  ? tr("settingsProviders.field.voiceOpenAI")
+                  : tr("settingsProviders.field.voiceSystem")
+            }
+          >
             {state.config.voice.provider === "openai" ? (
               <select
                 className="input"
@@ -433,7 +448,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
         {voiceCat?.notes && <Note>{voiceCat.notes}</Note>}
       </Section>
 
-      <Section title="API keys" description="Se guardan cifradas en data/dnd.db con AES-256-GCM y un secreto local.">
+      <Section title={tr("settingsProviders.section.keysTitle")} description={tr("settingsProviders.section.keysDesc")}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {state.keys.map((k) => {
             const needed = relevantKeyProviders.includes(k.provider);
@@ -454,7 +469,7 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
                   <input
                     className="input"
                     type="password"
-                    placeholder={k.source === "none" ? "sk-..." : "Deja vacío para mantener"}
+                    placeholder={k.source === "none" ? tr("settingsProviders.keyPlaceholderNew") : tr("settingsProviders.keyPlaceholderKeep")}
                     value={draft ?? ""}
                     onChange={(e) => setKeyDraft((prev) => ({ ...prev, [k.provider]: e.target.value }))}
                   />
@@ -463,9 +478,9 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
                       type="button"
                       className="btn-ghost"
                       onClick={() => setKeyDraft((prev) => ({ ...prev, [k.provider]: "" }))}
-                      title="Eliminar al guardar"
+                      title={tr("settingsProviders.keyClearTitle")}
                     >
-                      Borrar
+                      {tr("settingsProviders.keyClear")}
                     </button>
                   )}
                 </div>
@@ -473,17 +488,18 @@ export function ProvidersPanel({ initial }: { initial: ProvidersPayload }) {
             );
           })}
         </div>
-        <Note>
-          También puedes exponer variables de entorno: <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>,
-          <code> OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>XAI_API_KEY</code>, <code>STABILITY_API_KEY</code>, <code>ELEVENLABS_API_KEY</code>.
-        </Note>
+        <Note>{tr("settingsProviders.envVarsNote")}</Note>
       </Section>
 
       <div className="flex items-center gap-3">
         <button className="btn-accent" onClick={save} disabled={saving}>
-          {saving ? "Guardando…" : "Guardar proveedores"}
+          {saving ? tr("settingsProviders.saving") : tr("settingsProviders.save")}
         </button>
-        {savedAt && <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>Actualizado.</span>}
+        {savedAt && (
+          <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+            {tr("settingsProviders.updated")}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -537,8 +553,14 @@ function Note({ children }: { children: React.ReactNode }) {
 }
 
 function KeyBadge({ source, preview }: { source: "db" | "env" | "none"; preview: string }) {
-  if (source === "none") return <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>sin configurar</span>;
-  const label = source === "db" ? "guardada" : ".env";
+  const tr = useTranslations();
+  if (source === "none")
+    return (
+      <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
+        {tr("settingsProviders.keyBadgeUnset")}
+      </span>
+    );
+  const label = source === "db" ? tr("settingsProviders.keyBadgeStored") : ".env";
   return (
     <span className="badge" style={{ fontSize: "10px" }}>
       {label} · {preview}
@@ -559,10 +581,11 @@ function TestButton({
   onClick: () => void;
   disabled?: boolean;
 }) {
+  const tr = useTranslations();
   return (
     <div className="flex flex-col items-end gap-1">
       <button type="button" className="btn-ghost" onClick={onClick} disabled={busy || disabled}>
-        {busy ? "Probando…" : "Probar"}
+        {busy ? tr("settingsProviders.testRunning") : tr("settingsProviders.testRun")}
       </button>
       {typeof ok === "boolean" && (
         <span className="text-[11px]" style={{ color: ok ? "var(--color-accent-text)" : "#f09595" }}>

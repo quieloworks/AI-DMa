@@ -2,11 +2,13 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type CharacterOpt = { id: string; name: string; class: string | null; race: string | null; level: number };
 
 export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
   const router = useRouter();
+  const tr = useTranslations();
   const [title, setTitle] = useState("");
   const [seed, setSeed] = useState("");
   const [mode, setMode] = useState<"auto" | "assistant">("auto");
@@ -39,7 +41,7 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
       }
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? `Error ${res.status}`);
+        throw new Error(err.error ?? tr("storyNew.form.errorHttp", { status: res.status }));
       }
       const data = (await res.json()) as { sessionId: string };
       router.push(`/story/${data.sessionId}`);
@@ -58,11 +60,11 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
       return;
     }
     if (file.type && file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      setError("El archivo debe ser un PDF.");
+      setError(tr("storyNew.form.errorMustBePdf"));
       return;
     }
     if (file.size > 40 * 1024 * 1024) {
-      setError("El PDF es demasiado grande (máx 40 MB).");
+      setError(tr("storyNew.form.errorPdfTooBig"));
       return;
     }
     setError(null);
@@ -73,40 +75,39 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.5fr_1fr]">
       <div className="card space-y-4">
         <label className="block">
-          <span className="label">Título</span>
+          <span className="label">{tr("common.title")}</span>
           <input
             className="input mt-2"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Ej: Las ruinas de Astarel"
+            placeholder={tr("storyNew.form.titlePlaceholder")}
           />
         </label>
 
         <div>
-          <span className="label">Modo del Dungeon Master</span>
+          <span className="label">{tr("storyNew.form.dmModeLabel")}</span>
           <div className="mt-2 flex gap-2">
             <button
               type="button"
               onClick={() => setMode("auto")}
               className={mode === "auto" ? "btn-accent" : "btn-ghost"}
             >
-              Automático (IA narra todo)
+              {tr("storyNew.form.modeAuto")}
             </button>
             <button
               type="button"
               onClick={() => setMode("assistant")}
               className={mode === "assistant" ? "btn-accent" : "btn-ghost"}
             >
-              Asistente (un jugador es DM)
+              {tr("storyNew.form.modeAssistant")}
             </button>
           </div>
         </div>
 
         <div>
-          <span className="label">Aventura escrita (PDF · opcional)</span>
+          <span className="label">{tr("storyNew.form.pdfSectionLabel")}</span>
           <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            Si subes un módulo, el DM lo ingesta al empezar y lo usa como verdad oficial. Solo improvisa cuando el
-            archivo no cubra la situación.
+            {tr("storyNew.form.pdfHelp")}
           </p>
           <div
             className="mt-2 rounded-md px-3 py-3"
@@ -120,7 +121,7 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
                 <div className="min-w-0">
                   <p className="truncate text-sm">{pdf.name}</p>
                   <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    {(pdf.size / 1024 / 1024).toFixed(2)} MB · se ingesta al crear la historia
+                    {tr("storyNew.form.pdfIngestNote", { mb: (pdf.size / 1024 / 1024).toFixed(2) })}
                   </p>
                 </div>
                 <button
@@ -132,13 +133,13 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
                     if (fileInputRef.current) fileInputRef.current.value = "";
                   }}
                 >
-                  Quitar
+                  {tr("storyNew.form.pdfRemove")}
                 </button>
               </div>
             ) : (
               <div className="flex flex-col items-start gap-2">
                 <label className="btn-ghost cursor-pointer" style={{ fontSize: 13 }}>
-                  📄 Subir PDF de la aventura
+                  📄 {tr("storyNew.form.pdfUpload")}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -148,7 +149,7 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
                   />
                 </label>
                 <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                  Máx 40 MB · el DM usará el módulo como source of truth.
+                  {tr("storyNew.form.pdfMaxHint")}
                 </span>
               </div>
             )}
@@ -156,17 +157,16 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
         </div>
 
         <label className="block">
-          <span className="label">Semilla / idea de la historia {pdf && <span style={{ color: "var(--color-text-hint)" }}>· opcional si subes un PDF</span>}</span>
+          <span className="label">
+            {tr("storyNew.form.seedLabel")}{" "}
+            {pdf && <span style={{ color: "var(--color-text-hint)" }}>{tr("storyNew.form.seedOptionalHint")}</span>}
+          </span>
           <textarea
             className="input mt-2"
             style={{ height: 120, padding: 10 }}
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
-            placeholder={
-              pdf
-                ? "Opcional: notas extra para el DM (ej. 'empieza en el capítulo 2', 'los PCs ya se conocen')."
-                : "Un grupo de aventureros despierta en una mazmorra sin recordar cómo llegaron. Escuchan gruñidos lejanos..."
-            }
+            placeholder={pdf ? tr("storyNew.form.seedPlaceholderPdf") : tr("storyNew.form.seedPlaceholderNoPdf")}
           />
         </label>
 
@@ -181,10 +181,10 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
       </div>
 
       <div className="card">
-        <p className="label mb-3">Personajes que participan</p>
+        <p className="label mb-3">{tr("storyNew.form.charactersHeading")}</p>
         {characters.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-            Crea al menos un personaje antes de iniciar la historia.
+            {tr("storyNew.form.noCharacters")}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -199,7 +199,7 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
                   <div>
                     <p className="text-sm">{c.name}</p>
                     <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                      {c.race ?? "?"} · {c.class ?? "?"} nv. {c.level}
+                      {c.race ?? "?"} · {c.class ?? "?"} {tr("storyNew.form.levelAbbr", { n: c.level })}
                     </p>
                   </div>
                   <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
@@ -214,7 +214,13 @@ export function NewStoryForm({ characters }: { characters: CharacterOpt[] }) {
           onClick={submit}
           className="btn-accent mt-6 w-full"
         >
-          {busy ? (pdf ? "Subiendo e ingestando…" : "Creando…") : pdf ? "Ingestar PDF y comenzar" : "Comenzar la aventura"}
+          {busy
+            ? pdf
+              ? tr("storyNew.form.busyUploading")
+              : tr("storyNew.form.busyCreating")
+            : pdf
+              ? tr("storyNew.form.startWithPdf")
+              : tr("storyNew.form.startAdventure")}
         </button>
       </div>
     </div>

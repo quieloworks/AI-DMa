@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { extname } from "node:path";
 import { getDb } from "@/lib/db";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     .prepare<string, { path: string; kind: string }>("SELECT path, kind FROM asset WHERE id = ?")
     .get(id);
   if (!row || !existsSync(row.path)) {
-    return NextResponse.json({ error: "asset no encontrado" }, { status: 404 });
+    return NextResponse.json({ error: serverT("errors.assetNotFound") }, { status: 404 });
   }
   const ext = extname(row.path).toLowerCase();
   const mime = MIME[ext] ?? "application/octet-stream";

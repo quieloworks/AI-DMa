@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type Player = {
   playerId: string;
@@ -9,6 +10,7 @@ type Player = {
 };
 
 export function QrPanel({ sessionId, players }: { sessionId: string; players: Player[] }) {
+  const tr = useTranslations();
   const [url, setUrl] = useState<string>("");
   const [qr, setQr] = useState<string>("");
 
@@ -27,17 +29,17 @@ export function QrPanel({ sessionId, players }: { sessionId: string; players: Pl
       <div className="flex items-center gap-4">
         {qr ? <img src={qr} alt="QR" className="h-32 w-32 rounded-md" /> : <div className="h-32 w-32 rounded-md" style={{ background: "var(--color-bg-secondary)" }} />}
         <div>
-          <p className="label">Invitación por LAN</p>
-          <p className="mt-1 text-sm">Cada jugador escanea este código y selecciona su personaje con el enlace que le corresponda.</p>
+          <p className="label">{tr("qr.invite.title")}</p>
+          <p className="mt-1 text-sm">{tr("qr.invite.lead")}</p>
           <p className="mt-2 font-mono text-xs" style={{ color: "var(--color-accent)" }}>{url || "…"}</p>
         </div>
       </div>
       <div className="flex-1">
-        <p className="label mb-2">Enlaces por jugador</p>
+        <p className="label mb-2">{tr("qr.linksHeading")}</p>
         <ul className="space-y-1 text-xs">
           {players.map((p) => (
             <li key={p.playerId} className="flex items-center justify-between gap-2">
-              <span style={{ color: "var(--color-text-secondary)" }}>{p.character?.name ?? "—"}</span>
+              <span style={{ color: "var(--color-text-secondary)" }}>{p.character?.name ?? tr("common.empty")}</span>
               <code className="truncate font-mono" style={{ color: "var(--color-text-hint)" }}>
                 {url ? `${url}?p=${p.playerId}&t=${p.token}` : "…"}
               </code>

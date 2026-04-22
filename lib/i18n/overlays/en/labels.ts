@@ -9,6 +9,15 @@ export const ABILITY_LABEL_EN: Record<Ability, string> = {
   car: "Charisma",
 };
 
+export const ABILITY_ABBREV_EN: Record<Ability, string> = {
+  fue: "STR",
+  des: "DEX",
+  con: "CON",
+  int: "INT",
+  sab: "WIS",
+  car: "CHA",
+};
+
 /** Keys must match `SKILLS` in `lib/character.ts`. */
 export const SKILL_LABEL_EN: Record<string, string> = {
   acrobacias: "Acrobatics",

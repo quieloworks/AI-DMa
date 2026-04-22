@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateImage } from "@/server/providers/image";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
     cacheKey?: string;
     force?: boolean;
   };
-  if (!body.prompt) return NextResponse.json({ error: "prompt requerido" }, { status: 400 });
+  if (!body.prompt) return NextResponse.json({ error: serverT("errors.promptRequired") }, { status: 400 });
   try {
     const result = await generateImage({
       prompt: body.prompt,

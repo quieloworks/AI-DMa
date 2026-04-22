@@ -5,21 +5,10 @@ import { io, type Socket } from "socket.io-client";
 import { parseDmResponse, streamingNarrativePreview } from "./parse";
 import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
+import { useLocale, useTranslations } from "@/components/LocaleProvider";
 
 type Difficulty = "facil" | "medio" | "dificil" | "experto";
 const DIFFICULTY_VALUES: Difficulty[] = ["facil", "medio", "dificil", "experto"];
-const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  facil: "Fácil",
-  medio: "Medio",
-  dificil: "Difícil",
-  experto: "Experto",
-};
-const DIFFICULTY_SUB: Record<Difficulty, string> = {
-  facil: "Tarde relajada · CDs bajas, enemigos indulgentes",
-  medio: "Balanceado · CDs estándar 5E",
-  dificil: "Exigente · tácticas óptimas, recursos escasos",
-  experto: "Brutal · muerte permanente posible",
-};
 const DIFFICULTY_COLOR: Record<Difficulty, string> = {
   facil: "hsl(150, 55%, 55%)",
   medio: "hsl(210, 60%, 55%)",
@@ -77,14 +66,6 @@ function randomId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function toneLabel(value: number): string {
-  if (value <= 15) return "Estricto · puro manual";
-  if (value <= 35) return "Serio · cinematográfico";
-  if (value <= 55) return "Equilibrado · clásico";
-  if (value <= 75) return "Ocurrente · con chispa";
-  return "Bufonesco · cartoon";
-}
-
 function toneGradient(value: number): string {
   const hue = 220 - (value / 100) * 200;
   return `hsl(${hue}, 70%, 55%)`;
@@ -103,6 +84,8 @@ export function StoryRoom({
   initialMessages: Message[];
   initialState: InitialState;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const clientIdRef = useRef<string>(randomId());
   const [socket, setSocket] = useState<Socket | null>(null);
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
@@ -204,13 +187,13 @@ export function StoryRoom({
     } catch {}
     window.speechSynthesis?.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "es-ES";
+    utter.lang = locale === "en" ? "en-US" : "es-ES";
     utter.rate = 0.95;
     utter.pitch = 0.95;
     setPlayer({ id, url: "", playing: true, duration: 0, current: 0 });
     utter.onend = () => setPlayer(null);
     window.speechSynthesis?.speak(utter);
-  }, []);
+  }, [locale]);
 
   const togglePlay = useCallback(() => {
     const a = audioRef.current;
@@ -279,13 +262,21 @@ export function StoryRoom({
         by: { role: string; playerId?: string; label?: string };
         result: { breakdown: string; expression: string; total: number };
       }) => {
-        const who = evt.by.playerId ? playerMap[evt.by.playerId]?.character?.name ?? "Jugador" : "DM";
+        const who = evt.by.playerId
+          ? playerMap[evt.by.playerId]?.character?.name ?? tr("storyRoom.playerFallback")
+          : tr("storyRoom.dmShort");
+        const labelBracket = evt.by.label ? ` (${evt.by.label})` : "";
         setChat((prev) => [
           ...prev,
           {
             id: randomId(),
             role: "system",
-            text: `🎲 ${who} tira ${evt.result.expression} ${evt.by.label ? "(" + evt.by.label + ")" : ""}: ${evt.result.breakdown}`,
+            text: tr("storyRoom.dice.roll", {
+              who,
+              expression: evt.result.expression,
+              labelBracket,
+              breakdown: evt.result.breakdown,
+            }),
           },
         ]);
       }
@@ -299,15 +290,17 @@ export function StoryRoom({
       }) => {
         if (evt.sessionId !== sessionId) return;
         for (const req of evt.requests) {
-          const who = req.playerId ? playerMap[req.playerId]?.character?.name ?? "un jugador" : "el grupo";
+          const who = req.playerId
+            ? playerMap[req.playerId]?.character?.name ?? tr("storyRoom.dice.playerAnonymous")
+            : tr("storyRoom.dice.group");
+          const labelParen = req.label ? ` (${req.label})` : "";
+          const dcPart = req.dc ? ` — ${tr("storyRoom.dice.dcShort")} ${req.dc}` : "";
           setChat((prev) => [
             ...prev,
             {
               id: randomId(),
               role: "system",
-              text: `🎯 El DM pide a ${who} tirar ${req.expression}${req.label ? ` (${req.label})` : ""}${
-                req.dc ? ` — CD ${req.dc}` : ""
-              }.`,
+              text: tr("storyRoom.dice.request", { who, expression: req.expression, labelParen, dcPart }),
             },
           ]);
         }
@@ -336,7 +329,7 @@ export function StoryRoom({
     return () => {
       s.disconnect();
     };
-  }, [sessionId, playerMap, autoSpeak, speakText]);
+  }, [sessionId, playerMap, autoSpeak, speakText, tr]);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -365,10 +358,7 @@ export function StoryRoom({
         ]);
       }
       if (payload.action === "continue") {
-        setChat((prev) => [
-          ...prev,
-          { id: randomId(), role: "system", text: "— el DM retoma el hilo —" },
-        ]);
+        setChat((prev) => [...prev, { id: randomId(), role: "system", text: tr("storyRoom.system.continue") }]);
       }
 
       const dmId = randomId();
@@ -395,7 +385,7 @@ export function StoryRoom({
             clientId: clientIdRef.current,
           }),
         });
-        if (!res.body) throw new Error("sin stream");
+        if (!res.body) throw new Error(tr("storyRoom.stream.noBody"));
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -438,13 +428,15 @@ export function StoryRoom({
         }
       } catch (err) {
         setChat((prev) =>
-          prev.map((m) => (m.id === dmId ? { ...m, text: `Error: ${(err as Error).message}` } : m))
+          prev.map((m) =>
+            m.id === dmId ? { ...m, text: tr("storyRoom.stream.dmError", { message: (err as Error).message }) } : m
+          )
         );
       } finally {
         setStreaming(false);
       }
     },
-    [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText, combat]
+    [sessionId, story.mode, streaming, tone, difficulty, autoSpeak, speakText, combat, tr]
   );
 
   const ingestActive = !!ingest && ingest.status !== "done" && ingest.status !== "error";
@@ -527,7 +519,7 @@ export function StoryRoom({
           id: randomId(),
           role: "player",
           text,
-          playerName: first.character?.name ?? "Jugador",
+          playerName: first.character?.name ?? tr("storyRoom.playerFallback"),
           kind: "public",
         },
       ]);
@@ -535,7 +527,7 @@ export function StoryRoom({
     }
 
     const playerPid = players[0]?.playerId;
-    const playerName = players[0]?.character?.name ?? "Jugador";
+    const playerName = players[0]?.character?.name ?? tr("storyRoom.playerFallback");
     await runDm({ action: "player", text, playerId: playerPid, playerName, showPlayer: true });
   }
 
@@ -575,11 +567,12 @@ export function StoryRoom({
     setImageError(null);
     try {
       const lastDm = [...chat].reverse().find((m) => m.role === "dm")?.text ?? "";
+      const hintForPrompt = sceneHint === "ninguno" ? tr("storyRoom.sceneHeroicFallback") : sceneHint;
       const prompt = [
-        `Ilustración cinematográfica para una escena de Dungeons & Dragons titulada "${story.title}".`,
-        `Ambiente: ${sceneHint}.`,
-        lastDm ? `Narrativa reciente: ${lastDm.slice(0, 500)}` : "",
-        "Estilo pintura digital, iluminación atmosférica, composición amplia, sin texto ni logos.",
+        tr("storyRoom.image.scenePrompt1", { title: story.title }),
+        tr("storyRoom.image.scenePrompt2", { hint: hintForPrompt }),
+        lastDm ? tr("storyRoom.image.scenePrompt3", { excerpt: lastDm.slice(0, 500) }) : "",
+        tr("storyRoom.image.sceneStyle"),
       ]
         .filter(Boolean)
         .join(" ");
@@ -590,13 +583,13 @@ export function StoryRoom({
         body: JSON.stringify({
           prompt,
           title: story.title,
-          tags: ["historia", story.id, sceneHint, "escena"],
+          tags: [tr("storyRoom.image.tagStory"), story.id, sceneHint, tr("storyRoom.image.tagScene")],
           size: "1536x1024",
           cacheKey: `story:${story.id}:scene:${hintKey}`,
         }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !data.url) throw new Error(data.error ?? "falló la generación");
+      if (!res.ok || !data.url) throw new Error(data.error ?? tr("storyRoom.image.genFailed"));
       setSceneImage(data.url);
       void persistState({ sceneImage: data.url });
     } catch (err) {
@@ -610,11 +603,12 @@ export function StoryRoom({
     if (generatingCover || coverImage) return;
     setGeneratingCover(true);
     try {
+      const hintForCover = sceneHint === "ninguno" ? tr("storyRoom.sceneHeroicFallback") : sceneHint;
       const prompt = [
-        `Portada cinematográfica para una campaña de Dungeons & Dragons titulada "${story.title}".`,
-        story.summary ? `Premisa: ${story.summary.slice(0, 400)}.` : "",
-        `Ambiente sugerido: ${sceneHint === "ninguno" ? "fantasía heroica" : sceneHint}.`,
-        "Composición panorámica tipo póster, pintura digital, atmósfera épica, sin texto ni logos, protagonistas pequeños en un paisaje majestuoso.",
+        tr("storyRoom.image.coverPrompt1", { title: story.title }),
+        story.summary ? tr("storyRoom.image.coverPrompt2", { summary: story.summary.slice(0, 400) }) : "",
+        tr("storyRoom.image.coverPrompt3", { hint: hintForCover }),
+        tr("storyRoom.image.coverStyle"),
       ]
         .filter(Boolean)
         .join(" ");
@@ -623,8 +617,8 @@ export function StoryRoom({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          title: `${story.title} · portada`,
-          tags: ["historia", story.id, "portada"],
+          title: `${story.title}${tr("storyRoom.image.coverTitleSuffix")}`,
+          tags: [tr("storyRoom.image.tagStory"), story.id, tr("storyRoom.image.tagCover")],
           size: "1536x1024",
           cacheKey: `story:${story.id}:cover`,
         }),
@@ -637,7 +631,7 @@ export function StoryRoom({
     } finally {
       setGeneratingCover(false);
     }
-  }, [coverImage, generatingCover, sceneHint, story.id, story.summary, story.title]);
+  }, [coverImage, generatingCover, sceneHint, story.id, story.summary, story.title, tr]);
 
   function clearScene() {
     setSceneImage(null);
@@ -649,17 +643,17 @@ export function StoryRoom({
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <p className="label">Historia</p>
+            <p className="label">{tr("storyRoom.storyHeading")}</p>
             <h1 style={{ fontSize: 30 }}>{story.title}</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="badge">{story.mode === "auto" ? "DM automático" : "DM asistente"}</span>
+            <span className="badge">{story.mode === "auto" ? tr("storyRoom.mode.auto") : tr("storyRoom.mode.assistant")}</span>
             {combat && (
               <span
                 className="badge"
                 style={{ background: "rgba(216,90,48,0.18)", color: "#f4a582", borderColor: "rgba(216,90,48,0.35)" }}
               >
-                ⚔ En combate
+                {tr("storyRoom.inCombat")}
               </span>
             )}
             {!coverImage && (
@@ -668,37 +662,37 @@ export function StoryRoom({
                 onClick={() => void generateCover()}
                 className="btn-ghost"
                 disabled={generatingCover || generatingImage || combat}
-                title={
-                  combat
-                    ? "El mapa táctico está activo durante el combate"
-                    : "Ilustración de portada para la campaña (solo si la pides)"
-                }
+                title={combat ? tr("storyRoom.cover.titleCombat") : tr("storyRoom.cover.titleIdle")}
               >
-                {generatingCover ? "Pintando portada…" : "Generar portada"}
+                {generatingCover ? tr("storyRoom.cover.generating") : tr("storyRoom.cover.generate")}
               </button>
             )}
             <button
               onClick={generateScene}
               className="btn-ghost"
               disabled={generatingImage || generatingCover || combat}
-              title={combat ? "El mapa táctico está activo durante el combate" : "Pinta una ilustración de la escena actual"}
+              title={combat ? tr("storyRoom.scene.titleCombat") : tr("storyRoom.scene.titleIdle")}
             >
-              {generatingImage ? "Pintando…" : sceneImage ? "Nueva escena" : "Generar escena"}
+              {generatingImage
+                ? tr("storyRoom.scene.generating")
+                : sceneImage
+                  ? tr("storyRoom.scene.new")
+                  : tr("storyRoom.scene.generate")}
             </button>
             {sceneImage && !combat && (
-              <button onClick={clearScene} className="btn-ghost" title="Volver a la portada por defecto">
-                Portada
+              <button onClick={clearScene} className="btn-ghost" title={tr("storyRoom.scene.backToCoverTitle")}>
+                {tr("storyRoom.scene.backToCover")}
               </button>
             )}
             <button onClick={() => setShowQr((v) => !v)} className="btn-ghost">
-              {showQr ? "Ocultar QR" : "Invitar por QR"}
+              {showQr ? tr("storyRoom.qr.hide") : tr("storyRoom.qr.invite")}
             </button>
             <button
               onClick={() => setSettingsOpen((v) => !v)}
               className={settingsOpen ? "btn-accent" : "btn-ghost"}
               aria-expanded={settingsOpen}
             >
-              ⚙ Ajustes del DM
+              {tr("storyRoom.settings")}
             </button>
           </div>
         </div>
@@ -741,14 +735,14 @@ export function StoryRoom({
                     textTransform: "uppercase",
                   }}
                 >
-                  ⚔ esperando posiciones del DM…
+                  {tr("storyRoom.waitingDmMap")}
                 </p>
               </div>
             </div>
           ) : sceneImage ? (
             <div className="relative h-full w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={sceneImage} alt="Escena" className="h-full w-full object-cover" style={{ minHeight: 420 }} />
+              <img src={sceneImage} alt={tr("storyRoom.alt.scene")} className="h-full w-full object-cover" style={{ minHeight: 420 }} />
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{ background: "linear-gradient(to top, rgba(15,14,12,0.55), transparent 45%)" }}
@@ -758,14 +752,14 @@ export function StoryRoom({
                   className="badge"
                   style={{ background: "rgba(15,14,12,0.55)", color: "#faf7f1", borderColor: "rgba(255,255,255,0.15)" }}
                 >
-                  Escena actual
+                  {tr("storyRoom.sceneBadge")}
                 </span>
               </div>
             </div>
           ) : coverImage ? (
             <div className="relative h-full w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverImage} alt="Portada" className="h-full w-full object-cover" style={{ minHeight: 420 }} />
+              <img src={coverImage} alt={tr("storyRoom.alt.cover")} className="h-full w-full object-cover" style={{ minHeight: 420 }} />
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{ background: "linear-gradient(to top, rgba(15,14,12,0.65), transparent 55%)" }}
@@ -775,7 +769,7 @@ export function StoryRoom({
                   className="label"
                   style={{ color: "rgba(244,239,230,0.7)", letterSpacing: "0.14em" }}
                 >
-                  Portada
+                  {tr("storyRoom.coverBadge")}
                 </p>
                 <h2
                   style={{
@@ -798,7 +792,7 @@ export function StoryRoom({
                   className="pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs"
                   style={{ background: "rgba(15,14,12,0.6)", color: "rgba(244,239,230,0.75)" }}
                 >
-                  pintando portada…
+                  {tr("storyRoom.coverPaintingOverlay")}
                 </div>
               )}
             </div>
@@ -808,7 +802,8 @@ export function StoryRoom({
               className="absolute bottom-3 left-3 right-3 rounded-md px-3 py-2 text-xs"
               style={{ background: "rgba(216, 90, 48, 0.2)", color: "#f4a582" }}
             >
-              {imageError} — configura un proveedor en /settings o usa OpenAI/Gemini/Stability con API key.
+              {imageError}
+              {tr("storyRoom.imageErrorHint")}
             </div>
           )}
         </div>
@@ -824,16 +819,16 @@ export function StoryRoom({
                   <div>
                     <p className="text-sm font-medium">{p.character?.name ?? "—"}</p>
                     <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                      {p.character?.race ?? "?"} · {p.character?.class ?? "?"} · nv. {p.character?.level ?? 1}
+                      {p.character?.race ?? "?"} · {p.character?.class ?? "?"} · {tr("storyNew.form.levelAbbr", { n: p.character?.level ?? 1 })}
                     </p>
                   </div>
                   <span className="text-xs" style={{ color: p.connected ? "var(--color-accent)" : "var(--color-text-hint)" }}>
-                    {p.connected ? "● online" : "○ offline"}
+                    {p.connected ? tr("storyRoom.online") : tr("storyRoom.offline")}
                   </span>
                 </div>
                 <div className="mt-3">
                   <div className="flex items-center justify-between text-xs">
-                    <span style={{ color: "var(--color-text-hint)" }}>HP</span>
+                    <span style={{ color: "var(--color-text-hint)" }}>{tr("storyRoom.hp")}</span>
                     <span>
                       {hp.current}/{hp.max}
                       {hp.temp ? ` (+${hp.temp})` : ""}
@@ -869,15 +864,15 @@ export function StoryRoom({
         style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-secondary)", maxHeight: "calc(100vh - 160px)" }}
       >
         <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
-          <p className="label">Crónica</p>
+          <p className="label">{tr("storyRoom.chronicle")}</p>
           <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-            {chronicle.length} en grupo
-            {assistantFeed.length > 0 ? ` · ${assistantFeed.length} asistente` : ""}
-            {whisperFeed.length > 0 ? ` · ${whisperFeed.length} susurros` : ""}
+            {tr("storyRoom.chronicle.inGroup", { n: chronicle.length })}
+            {assistantFeed.length > 0 ? ` · ${tr("storyRoom.chronicle.assistant", { n: assistantFeed.length })}` : ""}
+            {whisperFeed.length > 0 ? ` · ${tr("storyRoom.chronicle.whispers", { n: whisperFeed.length })}` : ""}
           </span>
         </div>
 
-        {player && <AudioPlayer player={player} onToggle={togglePlay} onStop={stopPlay} onSeek={seekTo} />}
+        {player && <AudioPlayer player={player} onToggle={togglePlay} onStop={stopPlay} onSeek={seekTo} liveLabel={tr("storyRoom.audio.live")} />}
 
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
           {chronicle.map((m) => (
@@ -897,7 +892,7 @@ export function StoryRoom({
                   {m.text}
                 </p>
               ) : (
-                <PlayerBubble name={m.playerName ?? "Jugador"} text={m.text} />
+                <PlayerBubble name={m.playerName ?? tr("storyRoom.playerFallback")} text={m.text} />
               )}
             </div>
           ))}
@@ -910,7 +905,7 @@ export function StoryRoom({
               }}
             >
               <p className="label mb-2" style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
-                Solo DM — asistente (narrativa breve + bloque &lt;acciones&gt;)
+                {tr("storyRoom.assistantDmOnly")}
               </p>
               <div className="space-y-3">
                 {assistantFeed.map((m) => (
@@ -928,7 +923,7 @@ export function StoryRoom({
           {whisperFeed.length > 0 && (
             <div className="rounded-lg p-3" style={{ border: "0.5px solid var(--color-accent)", background: "var(--color-accent-bg)" }}>
               <p className="label mb-2" style={{ fontSize: 11, color: "var(--color-accent)" }}>
-                🔒 Susurros (no van al chat del grupo)
+                {tr("storyRoom.whispersPrivate")}
               </p>
               <div className="space-y-3">
                 {whisperFeed.map((m) => (
@@ -948,7 +943,7 @@ export function StoryRoom({
                         {m.text}
                       </p>
                     ) : (
-                      <PlayerBubble name={m.playerName ?? "Jugador"} text={m.text} />
+                      <PlayerBubble name={m.playerName ?? tr("storyRoom.playerFallback")} text={m.text} />
                     )}
                   </div>
                 ))}
@@ -957,7 +952,7 @@ export function StoryRoom({
           )}
           {streaming && (
             <p className="text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-              el DM está escribiendo…
+              {tr("storyRoom.dmTyping")}
             </p>
           )}
           <div ref={chatEnd} />
@@ -966,7 +961,7 @@ export function StoryRoom({
         <div className="space-y-2 p-4" style={{ borderTop: "0.5px solid var(--color-border)" }}>
           <div className="flex items-center gap-2">
             <label className="label" style={{ fontSize: 10 }}>
-              Dirigir a
+              {tr("storyRoom.directTo")}
             </label>
             <select
               value={whisperTo}
@@ -974,10 +969,10 @@ export function StoryRoom({
               className="input"
               style={{ height: 30, fontSize: 12, flex: 1 }}
             >
-              <option value="all">🎭 Todo el grupo (DM narra)</option>
+              <option value="all">{tr("storyRoom.option.wholeParty")}</option>
               {players.map((p) => (
                 <option key={p.playerId} value={p.playerId}>
-                  🔒 Susurro a {p.character?.name ?? p.playerId}
+                  {tr("storyRoom.option.whisperTo", { name: p.character?.name ?? p.playerId })}
                 </option>
               ))}
             </select>
@@ -987,10 +982,12 @@ export function StoryRoom({
               className="input"
               placeholder={
                 whisperTo !== "all"
-                  ? `Mensaje privado a ${playerMap[whisperTo]?.character?.name ?? ""}…`
+                  ? tr("storyRoom.placeholder.private", {
+                      name: playerMap[whisperTo]?.character?.name ?? "",
+                    })
                   : story.mode === "auto"
-                    ? "¿Qué hace tu personaje?"
-                    : "Instrucción para la IA asistente…"
+                    ? tr("storyRoom.placeholder.character")
+                    : tr("storyRoom.placeholder.assistant")
               }
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -1002,7 +999,7 @@ export function StoryRoom({
               }}
             />
             <button onClick={send} className="btn-accent" disabled={streaming || !input.trim()}>
-              {streaming ? "…" : whisperTo !== "all" ? "Susurrar" : "Enviar"}
+              {streaming ? "…" : whisperTo !== "all" ? tr("storyRoom.whisperVerb") : tr("storyRoom.send")}
             </button>
           </div>
           {story.mode === "auto" && whisperTo === "all" && (
@@ -1012,9 +1009,9 @@ export function StoryRoom({
                 className="btn-ghost"
                 style={{ flex: 1 }}
                 disabled={streaming}
-                title="Genera la siguiente narrativa usando el chat del grupo (acciones y tiradas ya publicadas)"
+                title={tr("storyRoom.continueStoryTitle")}
               >
-                ▶ Continuar historia
+                {tr("storyRoom.continueStory")}
               </button>
               {!openingDone && (
                 <button
@@ -1023,7 +1020,7 @@ export function StoryRoom({
                   style={{ flex: 1 }}
                   disabled={streaming}
                 >
-                  ✦ Abrir aventura
+                  {tr("storyRoom.openAdventure")}
                 </button>
               )}
             </div>
@@ -1051,6 +1048,7 @@ function DmSettingsDrawer({
   autoSpeak: boolean;
   onToggleAutoSpeak: () => void;
 }) {
+  const tr = useTranslations();
   return (
     <div
       className="rounded-lg"
@@ -1068,11 +1066,9 @@ function DmSettingsDrawer({
           style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-tertiary)" }}
         >
           <div>
-            <p className="label">Audio automático</p>
+            <p className="label">{tr("storyRoom.settings.autoAudio")}</p>
             <p className="text-xs" style={{ color: "var(--color-text-hint)", maxWidth: 280 }}>
-              {autoSpeak
-                ? "El DM narrará en voz alta cada nueva narrativa."
-                : "Usa el botón 🔊 de cada mensaje para escucharlo."}
+              {autoSpeak ? tr("storyRoom.settings.autoAudioOn") : tr("storyRoom.settings.autoAudioOff")}
             </p>
           </div>
           <button
@@ -1116,6 +1112,7 @@ function DifficultyDial({
   onChange: (v: Difficulty) => void;
   disabled?: boolean;
 }) {
+  const tr = useTranslations();
   const idx = Math.max(0, DIFFICULTY_VALUES.indexOf(value));
   return (
     <div
@@ -1124,9 +1121,9 @@ function DifficultyDial({
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="label">Dificultad</p>
+          <p className="label">{tr("storyRoom.difficulty.heading")}</p>
           <p className="text-sm" style={{ color: DIFFICULTY_COLOR[value] }}>
-            {DIFFICULTY_LABELS[value]}
+            {tr(`storyRoom.difficulty.${value}.label`)}
           </p>
         </div>
         <span className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
@@ -1157,12 +1154,12 @@ function DifficultyDial({
         <div className="mt-1 flex justify-between text-[10px]" style={{ color: "var(--color-text-hint)" }}>
           {DIFFICULTY_VALUES.map((d) => (
             <span key={d} style={{ color: d === value ? DIFFICULTY_COLOR[d] : undefined }}>
-              {DIFFICULTY_LABELS[d].toLowerCase()}
+              {tr(`storyRoom.difficulty.${d}.label`).toLowerCase()}
             </span>
           ))}
         </div>
         <p className="mt-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-          {DIFFICULTY_SUB[value]}
+          {tr(`storyRoom.difficulty.${value}.sub`)}
         </p>
       </div>
     </div>
@@ -1174,11 +1171,13 @@ function AudioPlayer({
   onToggle,
   onStop,
   onSeek,
+  liveLabel,
 }: {
   player: { id: string; playing: boolean; duration: number; current: number };
   onToggle: () => void;
   onStop: () => void;
   onSeek: (t: number) => void;
+  liveLabel: string;
 }) {
   const pct = player.duration > 0 ? (player.current / player.duration) * 100 : 0;
   return (
@@ -1205,7 +1204,7 @@ function AudioPlayer({
         />
         <div className="flex justify-between text-[10px]" style={{ color: "var(--color-text-hint)" }}>
           <span>{formatTime(player.current)}</span>
-          <span>{player.duration ? formatTime(player.duration) : "live"}</span>
+          <span>{player.duration ? formatTime(player.duration) : liveLabel}</span>
         </div>
       </div>
       <span className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
@@ -1231,6 +1230,17 @@ function ToneDial({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
+  const tr = useTranslations();
+  const band =
+    value <= 15
+      ? tr("storyRoom.tone.band1")
+      : value <= 35
+        ? tr("storyRoom.tone.band2")
+        : value <= 55
+          ? tr("storyRoom.tone.band3")
+          : value <= 75
+            ? tr("storyRoom.tone.band4")
+            : tr("storyRoom.tone.band5");
   return (
     <div
       className="rounded-lg px-4 py-3"
@@ -1238,9 +1248,9 @@ function ToneDial({
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="label">Tono del DM</p>
+          <p className="label">{tr("storyRoom.tone.heading")}</p>
           <p className="text-sm" style={{ color: toneGradient(value) }}>
-            {toneLabel(value)}
+            {band}
           </p>
         </div>
         <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>
@@ -1266,9 +1276,9 @@ function ToneDial({
           }}
         />
         <div className="mt-1 flex justify-between text-[10px]" style={{ color: "var(--color-text-hint)" }}>
-          <span>serio · manual</span>
-          <span>equilibrado</span>
-          <span>ocurrente · cartoon</span>
+          <span>{tr("storyRoom.tone.axisLeft")}</span>
+          <span>{tr("storyRoom.tone.axisMid")}</span>
+          <span>{tr("storyRoom.tone.axisRight")}</span>
         </div>
       </div>
     </div>
@@ -1291,6 +1301,12 @@ function DmBubble({
   isPrivate?: boolean;
   target?: string;
 }) {
+  const tr = useTranslations();
+  const whisperTitle = isPrivate
+    ? tr("storyRoom.bubble.whisper", {
+        target: target ? tr("storyRoom.bubble.whisperTo", { name: target }) : "",
+      })
+    : tr("storyRoom.bubble.dm");
   return (
     <div
       className="rounded-lg p-3"
@@ -1301,7 +1317,7 @@ function DmBubble({
     >
       <div className="mb-1 flex items-center justify-between">
         <span className="label" style={{ color: "var(--color-accent)" }}>
-          {isPrivate ? `🔒 Susurro${target ? " → " + target : ""}` : "Dungeon Master"}
+          {whisperTitle}
         </span>
         {!isPrivate ? (
           <button
@@ -1309,11 +1325,11 @@ function DmBubble({
             className="text-xs"
             style={{ color: active ? "var(--color-accent)" : "var(--color-text-hint)" }}
           >
-            {active ? (playing ? "🔊 sonando" : "⏸ pausado") : "🔊 leer"}
+            {active ? (playing ? tr("storyRoom.bubble.playing") : tr("storyRoom.bubble.paused")) : tr("storyRoom.bubble.read")}
           </button>
         ) : (
           <span className="text-[10px]" style={{ color: "var(--color-text-hint)" }}>
-            no se narra al grupo
+            {tr("storyRoom.bubble.noGroupAudio")}
           </span>
         )}
       </div>
@@ -1325,15 +1341,13 @@ function DmBubble({
 }
 
 function AdventureIngestBanner({ ingest }: { ingest: AdventureIngest }) {
-  const phaseLabel: Record<NonNullable<AdventureIngest["phase"]>, string> = {
-    extracting: "Leyendo PDF",
-    embedding: "Indexando fragmentos",
-    summarizing: "Redactando esquema de la aventura",
-    done: "Aventura lista",
-    error: "Error",
+  const tr = useTranslations();
+  const phaseLabel = (p: NonNullable<AdventureIngest["phase"]>) => {
+    const key = `storyRoom.ingest.phase.${p}` as const;
+    return tr(key);
   };
   const phase = ingest.phase ?? (ingest.status === "done" ? "done" : "extracting");
-  const label = phaseLabel[phase];
+  const label = phaseLabel(phase);
   const total = ingest.total ?? 0;
   const done = ingest.done ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : phase === "done" ? 100 : 5;
@@ -1358,14 +1372,14 @@ function AdventureIngestBanner({ ingest }: { ingest: AdventureIngest }) {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="label" style={{ color: accent }}>
-            {isDone ? "📘 Módulo cargado" : isError ? "⚠ Fallo al ingerir" : "📖 Ingestando tu módulo"}
+            {isDone ? tr("storyRoom.ingest.title.done") : isError ? tr("storyRoom.ingest.title.error") : tr("storyRoom.ingest.title.running")}
           </p>
           <p className="mt-1 text-sm truncate" style={{ color: "var(--color-text-secondary)" }}>
             {ingest.fileName ? <span>{ingest.fileName} · </span> : null}
             {isError
-              ? ingest.error ?? "Ocurrió un error."
+              ? ingest.error ?? tr("storyRoom.ingest.errorGeneric")
               : isDone
-                ? "El DM usará esta aventura como verdad oficial durante toda la partida."
+                ? tr("storyRoom.ingest.doneDetail")
                 : `${label}${total > 0 ? ` · ${done}/${total}` : ""}`}
           </p>
         </div>
@@ -1392,7 +1406,7 @@ function AdventureIngestBanner({ ingest }: { ingest: AdventureIngest }) {
       )}
       {!isDone && !isError && (
         <p className="mt-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-          El DM esperará a terminar la ingesta antes de abrir la aventura.
+          {tr("storyRoom.ingest.waitHint")}
         </p>
       )}
     </div>

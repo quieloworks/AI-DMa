@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, getMeta, setMeta } from "@/lib/db";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       "SELECT id, title, mode, summary, data_json, created_at, updated_at FROM story WHERE id = ?"
     )
     .get(id);
-  if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!row) return NextResponse.json({ error: serverT("errors.notFound") }, { status: 404 });
   const sessions = db
     .prepare<string, { id: string; turn: number; updated_at: number }>(
       "SELECT id, turn, updated_at FROM session WHERE story_id = ? ORDER BY updated_at DESC"
@@ -25,7 +26,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const body = (await req.json()) as { title?: string; summary?: string; mode?: "auto" | "assistant"; data?: Record<string, unknown> };
   const db = getDb();
   const row = db.prepare<string, { data_json: string }>("SELECT data_json FROM story WHERE id = ?").get(id);
-  if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!row) return NextResponse.json({ error: serverT("errors.notFound") }, { status: 404 });
 
   const updates: string[] = [];
   const params: Array<string | number | null> = [];

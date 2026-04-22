@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { getDb } from "@/lib/db";
 import { embed } from "./ollama";
 import { chatComplete } from "./providers/chat";
+import { serverT } from "@/lib/i18n/server";
 
 export type AdventureChunk = {
   id: number;
@@ -309,32 +310,8 @@ export async function summarizeAdventure(storyId: string): Promise<string | null
   if (!sample) return null;
 
   const messages = [
-    {
-      role: "system" as const,
-      content:
-        "Eres un asistente que resume aventuras de D&D. Produce un esquema compacto en español, fiel al texto. No inventes nada que no esté en el material.",
-    },
-    {
-      role: "user" as const,
-      content: `A continuación hay fragmentos iniciales de un módulo/aventura de D&D.
-
-=== FRAGMENTOS ===
-${sample}
-=== FIN ===
-
-Devuelve un ESQUEMA en español, en Markdown ligero, con estas secciones cuando se puedan inferir (omite las que no aparezcan):
-
-**Premisa**: 2-3 frases con el gancho de la aventura.
-**Tono**: palabras clave (heroico, terror, investigación, etc.).
-**Ubicación principal**: dónde ocurre.
-**Actos / capítulos**: lista breve (máx 6) con una frase por acto.
-**NPCs clave**: lista con nombre → rol.
-**Enemigos / amenazas**: lista corta.
-**Objetivos de los jugadores**: lista corta.
-**Ganchos narrativos**: 3-5 puntos para mantener al DM en ruta.
-
-Sé conciso (máx 500 palabras). No inventes nombres ni eventos que no estén.`,
-    },
+    { role: "system" as const, content: serverT("adventure.summarize.system") },
+    { role: "user" as const, content: serverT("adventure.summarize.user", { sample }) },
   ];
 
   try {

@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { PlayRoom } from "./room";
+import { getGlobalSettings } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/t";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,7 @@ export default async function PlayPage({
   ).get(sessionId);
   if (!session) notFound();
 
+  const locale = getGlobalSettings().locale;
   const story = db.prepare<string, { title: string; mode: string }>("SELECT title, mode FROM story WHERE id = ?").get(session.story_id);
 
   const players = db
@@ -45,7 +48,7 @@ export default async function PlayPage({
   return (
     <PlayRoom
       sessionId={sessionId}
-      storyTitle={story?.title ?? "Aventura"}
+      storyTitle={story?.title ?? t(locale, "play.fallbackStoryTitle")}
       storyMode={story?.mode === "assistant" ? "assistant" : "auto"}
       players={enriched}
       initialPlayerId={sp.p}

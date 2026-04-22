@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkSystemTts } from "@/server/system-tts";
 import { synthesizeVoice } from "@/server/providers/voice";
 import { getProvidersConfig } from "@/server/providers/config";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as { text: string; voice?: string; emotion?: string };
-  if (!body?.text) return NextResponse.json({ error: "text requerido" }, { status: 400 });
+  if (!body?.text) return NextResponse.json({ error: serverT("errors.textRequired") }, { status: 400 });
 
   const result = await synthesizeVoice({ text: body.text, voice: body.voice, emotion: body.emotion });
   if (result.kind === "fallback") {

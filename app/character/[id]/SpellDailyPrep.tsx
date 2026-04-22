@@ -10,6 +10,7 @@ import {
   nonCantripSpellPicks,
   type Ability,
 } from "@/lib/character";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type Props = { character: Character };
 
@@ -20,6 +21,7 @@ function withEffectiveKnown(c: Character): Character {
 /** PHB: lanzadores con conjuros preparados pueden cambiar el subconjunto tras un descanso largo. */
 export function SpellDailyPrep({ character: initial }: Props) {
   const router = useRouter();
+  const tr = useTranslations();
   const [char, setChar] = useState<Character>(() => withEffectiveKnown(initial));
   const [err, setErr] = useState<string | null>(null);
 
@@ -70,7 +72,7 @@ export function SpellDailyPrep({ character: initial }: Props) {
     const willPrepare = !row.prepared;
     const preparedCount = snapshot.spells.known.filter((s) => s.level >= 1 && s.prepared).length;
     if (willPrepare && preparedCount >= maxPrepared) {
-      setErr(`Sólo puedes tener ${maxPrepared} conjuros de nivel ≥1 preparados (PHB).`);
+      setErr(tr("spellDailyPrep.maxReached", { maxPrepared }));
       return;
     }
     const known = snapshot.spells.known.map((s, i) => (i === idx ? { ...s, prepared: willPrepare } : s));
@@ -82,11 +84,11 @@ export function SpellDailyPrep({ character: initial }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ spells: nextSpells }),
       });
-      if (!res.ok) throw new Error("No se pudo guardar");
+      if (!res.ok) throw new Error("save failed");
       router.refresh();
     } catch {
       setChar(snapshot);
-      setErr("Error al guardar. Inténtalo de nuevo.");
+      setErr(tr("spellDailyPrep.saveRetry"));
     }
   }
 
@@ -96,27 +98,29 @@ export function SpellDailyPrep({ character: initial }: Props) {
 
   if (leveledRows.length === 0) return null;
 
+  const preparedNow = char.spells.known.filter((s) => s.level >= 1 && s.prepared).length;
+
   return (
     <div className="mb-4 rounded-md p-3" style={{ background: "var(--color-bg-tertiary)", border: "0.5px solid var(--color-border)" }}>
-      <p className="label mb-1">Preparación diaria</p>
+      <p className="label mb-1">{tr("spellDailyPrep.title")}</p>
       <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-        Tras un descanso largo (PHB), elige hasta {maxPrepared} conjuros de nivel ≥1 preparados entre tu repertorio de clase. Los trucos no cuentan.{" "}
-        Ahora: {char.spells.known.filter((s) => s.level >= 1 && s.prepared).length}/{maxPrepared}.
+        {tr("spellDailyPrep.intro", { maxPrepared })}{" "}
+        {tr("spellDailyPrep.nowCount", { current: preparedNow, maxPrepared })}
       </p>
       {maxPrepared === 0 ? (
         <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-          Aún no tienes ranuras de conjuro de nivel 1+.
+          {tr("spellDailyPrep.noSlotsYet")}
         </p>
       ) : (
         <ul className="max-h-56 space-y-2 overflow-y-auto text-sm">
           {leveledRows.map(({ s, idx }) => (
             <li key={`${idx}-${s.name}`} className="flex items-center justify-between gap-2">
               <span>
-                <span style={{ color: "var(--color-accent)" }}>Nv {s.level}</span> · {s.name}
+                <span style={{ color: "var(--color-accent)" }}>{tr("characterSheet.spellLevelMark", { n: s.level })}</span> · {s.name}
               </span>
               <label className="flex cursor-pointer items-center gap-2 text-xs">
                 <input type="checkbox" checked={s.prepared} onChange={() => void togglePrepared(idx)} />
-                Preparado
+                {tr("spellDailyPrep.preparedLabel")}
               </label>
             </li>
           ))}

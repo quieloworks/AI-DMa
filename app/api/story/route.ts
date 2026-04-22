@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDb } from "@/lib/db";
 import { ingestAdventure } from "@/server/adventure";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!payload.title || !Array.isArray(payload.playerCharacterIds) || payload.playerCharacterIds.length === 0) {
-    return NextResponse.json({ error: "Título y personajes son obligatorios." }, { status: 400 });
+    return NextResponse.json({ error: serverT("errors.storyTitleAndCharacters") }, { status: 400 });
   }
 
   const db = getDb();

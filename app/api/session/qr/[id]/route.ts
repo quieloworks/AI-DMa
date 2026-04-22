@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { getDb } from "@/lib/db";
 import { getLanBaseUrl } from "@/server/network";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
   const db = getDb();
   const row = db.prepare<string, { id: string }>("SELECT id FROM session WHERE id = ?").get(id);
-  if (!row) return NextResponse.json({ error: "Sesión no existe" }, { status: 404 });
+  if (!row) return NextResponse.json({ error: serverT("errors.sessionNotFound") }, { status: 404 });
 
   const port = Number(process.env.PORT ?? 3000);
   const base = getLanBaseUrl(port);

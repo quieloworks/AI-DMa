@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       "SELECT id, story_id, state_json, turn FROM session WHERE id = ?"
     )
     .get(id);
-  if (!session) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!session) return NextResponse.json({ error: serverT("errors.notFound") }, { status: 404 });
 
   const story = db
     .prepare<string, { id: string; title: string; mode: string; summary: string | null; data_json: string }>(
@@ -56,7 +57,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
   if (body.state) {
     const row = db.prepare<string, { state_json: string }>("SELECT state_json FROM session WHERE id = ?").get(id);
-    if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (!row) return NextResponse.json({ error: serverT("errors.notFound") }, { status: 404 });
     const merged = { ...JSON.parse(row.state_json), ...body.state };
     db.prepare("UPDATE session SET state_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(merged), Date.now(), id);
   }

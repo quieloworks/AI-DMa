@@ -25,6 +25,7 @@ import { t } from "@/lib/i18n/t";
 import {
   featForLocale,
   localizeGamePhrase,
+  localizedAbilityAbbrev,
   localizedAbilityLabel,
   localizedBackgroundBasics,
   localizedClassBasics,
@@ -32,6 +33,7 @@ import {
   localizedRaceVariant,
   localizedSkillLabel,
 } from "@/lib/i18n/game-localize";
+import { displayLanguageName } from "@/lib/i18n/language-names";
 import { spellForLocale } from "@/lib/i18n/spell-i18n";
 import { findSpellByName } from "@/lib/spells";
 import type { AppLocale } from "@/lib/i18n/locale";
@@ -117,7 +119,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
           <div className="grid grid-cols-3 gap-2">
             {ABILITIES.map((a) => (
               <div key={a} className="rounded-md p-2 text-center" style={{ background: "var(--color-bg-tertiary)" }}>
-                <p className="label uppercase">{a}</p>
+                <p className="label uppercase">{localizedAbilityAbbrev(a, locale)}</p>
                 <p style={{ fontFamily: "var(--font-display)", fontSize: 22 }}>{effectiveAbility(ch, a)}</p>
                 <p style={{ color: "var(--color-text-hint)", fontSize: 11 }}>{fmt(abilityMod(effectiveAbility(ch, a)))}</p>
               </div>
@@ -138,36 +140,36 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         </div>
 
         <div className="card">
-          <p className="label mb-3">Vitales</p>
+          <p className="label mb-3">{tr("characterSheet.vitals")}</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Stat label="HP" value={`${ch.hp.current}/${ch.hp.max}`} />
+              <Stat label={tr("characterSheet.statHp")} value={`${ch.hp.current}/${ch.hp.max}`} />
               {ch.hp.levelUpRolls && ch.hp.levelUpRolls.length > 0 && (
                 <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                  PG por tiradas (niv. 2+): {ch.hp.levelUpRolls.join(", ")} (d{ch.hp.hitDie})
+                  {tr("characterSheet.hpRollsNote", { rolls: ch.hp.levelUpRolls.join(", "), die: ch.hp.hitDie })}
                 </p>
               )}
             </div>
             <div>
-              <Stat label="CA" value={ch.ac} />
+              <Stat label={tr("characterSheet.statAc")} value={ch.ac} />
               {(ch.acOtherBonus ?? 0) !== 0 && (
                 <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                  Anotado +{ch.acOtherBonus} por objetos mágicos (PHB).
+                  {tr("characterSheet.acMagicNote", { n: ch.acOtherBonus ?? 0 })}
                 </p>
               )}
             </div>
-            <Stat label="Iniciativa" value={fmt(initiative(ch))} />
-            <Stat label="Vel." value={`${ch.speed} ft`} />
+            <Stat label={tr("characterSheet.initiative")} value={fmt(initiative(ch))} />
+            <Stat label={tr("characterSheet.speedShort")} value={`${ch.speed} ft`} />
           </div>
           <div className="my-4 divider" />
-          <p className="label mb-2">Competencia</p>
+          <p className="label mb-2">{tr("characterSheet.proficiency")}</p>
           <p style={{ fontFamily: "var(--font-display)", fontSize: 22 }}>+{proficiencyBonus(ch.level)}</p>
-          <p className="label mt-4 mb-2">Dado de golpe</p>
+          <p className="label mt-4 mb-2">{tr("characterSheet.hitDie")}</p>
           <p>d{ch.hp.hitDie}</p>
         </div>
 
         <div className="card">
-          <p className="label mb-3">Habilidades</p>
+          <p className="label mb-3">{tr("characterSheet.skillsHeading")}</p>
           <ul className="grid grid-cols-1 gap-1 text-sm">
             {Object.entries(SKILLS).map(([key, s]) => (
               <li key={key} className="flex items-center justify-between">
@@ -185,7 +187,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
         <div className="mt-6 card">
           <SpellDailyPrep character={ch} />
           <div className="mb-3 flex items-center justify-between">
-            <p className="label">Conjuros</p>
+            <p className="label">{tr("characterSheet.spellsHeading")}</p>
             {ch.spells.ability && (
               <span className="badge">
                 {tr("characterSheet.spellAbility")}: {localizedAbilityLabel(ch.spells.ability, locale)}
@@ -198,7 +200,11 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
                 .sort(([a], [b]) => Number(a) - Number(b))
                 .map(([lvl, s]) => (
                   <span key={lvl} className="badge">
-                    Nv {lvl}: {s.max - s.used}/{s.max}
+                    {tr("characterSheet.spellSlotBadge", {
+                      lvl,
+                      used: s.max - s.used,
+                      max: s.max,
+                    })}
                   </span>
                 ))}
             </div>
@@ -210,7 +216,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
               return (
                 <li key={i}>
                   <span style={{ color: "var(--color-accent)" }}>
-                    {s.level === 0 ? "Truco" : `Nv ${s.level}`}
+                    {s.level === 0 ? tr("wizard.spells.cantripBadge") : tr("characterSheet.spellLevelMark", { n: s.level })}
                   </span>{" "}
                   · {s.prepared ? "●" : "○"} {dispName}
                 </li>
@@ -291,7 +297,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="card">
-          <p className="label mb-3">Equipamiento</p>
+          <p className="label mb-3">{tr("characterSheet.equipmentHeading")}</p>
           <ul className="space-y-1 text-sm">
             {ch.equipment.map((it, i) => (
               <li key={i}>
@@ -301,22 +307,27 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             ))}
           </ul>
           <div className="my-4 divider" />
-          <p className="label mb-2">Monedas</p>
-          <p className="text-sm">PC {ch.money.cp} · PP {ch.money.sp} · PE {ch.money.ep} · PO {ch.money.gp} · PPL {ch.money.pp}</p>
+          <p className="label mb-2">{tr("characterSheet.moneyHeading")}</p>
+          <p className="text-sm">
+            {tr("pdf.sheet.cp")} {ch.money.cp} · {tr("pdf.sheet.sp")} {ch.money.sp} · {tr("pdf.sheet.ep")} {ch.money.ep} ·{" "}
+            {tr("pdf.sheet.gp")} {ch.money.gp} · {tr("pdf.sheet.pp")} {ch.money.pp}
+          </p>
         </div>
         <div className="card">
-          <p className="label mb-3">Rasgos</p>
+          <p className="label mb-3">{tr("characterSheet.featuresHeading")}</p>
           {ch.features.map((f, i) => (
             <div key={i} className="mb-3">
-              <p className="font-medium">{f.name}</p>
+              <p className="font-medium">{localizeGamePhrase(f.name, locale)}</p>
               <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                {f.text}
+                {localizeGamePhrase(f.text, locale)}
               </p>
             </div>
           ))}
           <div className="my-4 divider" />
-          <p className="label mb-2">Idiomas</p>
-          <p className="text-sm">{ch.proficiencies.languages.join(", ") || "—"}</p>
+          <p className="label mb-2">{tr("characterSheet.languagesHeading")}</p>
+          <p className="text-sm">
+            {ch.proficiencies.languages.map((lang) => displayLanguageName(lang, locale)).join(", ") || tr("characterSheet.emDash")}
+          </p>
         </div>
       </div>
     </Shell>
