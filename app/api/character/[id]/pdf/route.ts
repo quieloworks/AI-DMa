@@ -2,10 +2,12 @@ import { NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
 import { buildCharacterSheetPdf } from "@/server/character-pdf";
 import { CharacterSchema } from "@/lib/character";
+import { getGlobalSettings } from "@/lib/i18n/server";
+import { normalizeLocale } from "@/lib/i18n/locale";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const row = getDb()
     .prepare<string, { data_json: string; name: string }>("SELECT data_json, name FROM character WHERE id = ?")
@@ -15,7 +17,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const parsed = CharacterSchema.safeParse({ ...data, id });
   if (!parsed.success) return new Response(`Character data inválida: ${parsed.error.message}`, { status: 400 });
 
-  const pdf = await buildCharacterSheetPdf(parsed.data);
+  const locale = normalizeLocale(req.nextUrl.searchParams.get("locale") ?? getGlobalSettings().locale);
+  const pdf = await buildCharacterSheetPdf(parsed.data, locale);
   return new Response(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",

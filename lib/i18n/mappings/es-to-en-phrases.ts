@@ -174,6 +174,55 @@ const ES_TO_EN_PHRASES: Record<string, string> = {
   "flechas": "arrows",
   "virote": "bolt",
   "virotes": "bolts",
+
+  /** Feat / rule prerequisite snippets */
+  "Competencia con armadura ligera": "Proficiency with light armor",
+  "Competencia con armadura media": "Proficiency with medium armor",
+  "Competencia con armadura pesada": "Proficiency with heavy armor",
+  "Capaz de lanzar al menos un conjuro": "Ability to cast at least one spell",
+  "Destreza 13": "Dexterity 13",
+  "Fuerza 13": "Strength 13",
+  "Carisma 13": "Charisma 13",
+  "Inteligencia o Sabiduría 13": "Intelligence or Wisdom 13",
+
+  /** Background tool placeholders (`lib/tools.ts`) */
+  "Un juego de herramientas de artesano": "One set of artisan's tools",
+
+  /** PHB musical instruments (ES → EN) */
+  Gaita: "Bagpipes",
+  Tambor: "Drum",
+  Dulcémele: "Dulcimer",
+  Flauta: "Flute",
+  Lira: "Lyre",
+  Cuerno: "Horn",
+  "Flauta de pan": "Pan flute",
+  Chirimía: "Shawm",
+  Viol: "Viol",
+
+  /** PHB artisan's tools */
+  "Herramientas de alquimista": "Alchemist's supplies",
+  "Herramientas de herrero": "Smith's tools",
+  "Suministros de cervecero": "Brewer's supplies",
+  "Suministros de calígrafo": "Calligrapher's supplies",
+  "Herramientas de carpintero": "Carpenter's tools",
+  "Herramientas de cartógrafo": "Cartographer's tools",
+  "Herramientas de zapatero": "Cobbler's tools",
+  "Utensilios de cocinero": "Cook's utensils",
+  "Herramientas de soplador de vidrio": "Glassblower's tools",
+  "Herramientas de joyero": "Jeweler's tools",
+  "Herramientas de peletero": "Leatherworker's tools",
+  "Herramientas de albañil": "Mason's tools",
+  "Suministros de pintor": "Painter's supplies",
+  "Herramientas de alfarero": "Potter's tools",
+  "Herramientas de chapucero": "Tinker's tools",
+  "Herramientas de tejedor": "Weaver's tools",
+  "Herramientas de tallador de madera": "Woodcarver's tools",
+
+  /** PHB gaming sets */
+  Dados: "Dice",
+  "Dragón (juego de mesa)": "Dragonchess set",
+  "Ante de tres dragones": "Three-Dragon Ante set",
+  Baraja: "Playing card set",
 };
 
 const SORTED_KEYS = Object.keys(ES_TO_EN_PHRASES).sort((a, b) => b.length - a.length);

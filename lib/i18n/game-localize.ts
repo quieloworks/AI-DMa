@@ -105,3 +105,5 @@ export function localizedFightingStyle(fs: FightingStyle, locale: AppLocale | un
   const o = FIGHTING_STYLE_UI_EN[fs.id];
   return o ? { ...fs, label: o.label, summary: o.summary } : fs;
 }
+
+export { featForLocale } from "./feat-i18n";

@@ -55,6 +55,7 @@ import {
   localizedSkillLabel,
   localizedSpellSchool,
   localizedFightingStyle,
+  featForLocale,
 } from "@/lib/i18n/game-localize";
 import { spellForLocale, spellSortLocale } from "@/lib/i18n/spell-i18n";
 import type { AppLocale } from "@/lib/i18n/locale";
@@ -2208,14 +2209,19 @@ function ReviewStep({
         <div className="card">
           <p className="label mb-2">{tr("wizard.review.feats")}</p>
           <ul className="space-y-3 text-sm">
-            {featRecords.map((f) => (
-              <li key={f.id}>
-                <p><strong>{f.name}</strong></p>
-                <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                  {f.summary}
-                </p>
-              </li>
-            ))}
+            {featRecords.map((f) => {
+              const fd = featForLocale(f, locale);
+              return (
+                <li key={f.id}>
+                  <p>
+                    <strong>{fd.name}</strong>
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    {fd.summary}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -2729,6 +2735,7 @@ function FeatList({
       <p className="label mb-3">{title}</p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {FEATS.map((feat) => {
+          const fd = featForLocale(feat, locale);
           const picked = selectedIds.includes(feat.id);
           const reservedElsewhere = !picked && disabledIds.has(feat.id);
           const disabled = reservedElsewhere || (!picked && full);
@@ -2746,10 +2753,10 @@ function FeatList({
               >
                 <div className="flex-1">
                   <p className="text-sm">
-                    <strong>{feat.name}</strong>
-                    {feat.prerequisite && (
+                    <strong>{fd.name}</strong>
+                    {fd.prerequisite && (
                       <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        {tr("wizard.feats.req")} {feat.prerequisite}
+                        {tr("wizard.feats.req")} {fd.prerequisite}
                       </span>
                     )}
                     {reservedElsewhere && (
@@ -2759,14 +2766,14 @@ function FeatList({
                     )}
                   </p>
                   <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                    {feat.summary}
+                    {fd.summary}
                   </p>
                 </div>
                 <input type="checkbox" checked={picked} disabled={disabled} onChange={() => onToggle(feat.id)} />
               </label>
               {picked && (
                 <ul className="mt-3 space-y-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                  {feat.grants.map((line, i) => (
+                  {fd.grants.map((line, i) => (
                     <li key={i}>· {line}</li>
                   ))}
                 </ul>
@@ -3010,6 +3017,7 @@ function AsiSlot({
           <p className="label mb-2">{tr("wizard.asi.pickFeat")}</p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {FEATS.map((feat) => {
+              const fd = featForLocale(feat, locale);
               const reservedAsRacial = reservedRacial.has(feat.id);
               const reservedElsewhere = reservedOtherSlots.has(feat.id);
               const picked = value.featId === feat.id;
@@ -3033,10 +3041,10 @@ function AsiSlot({
                   >
                     <div className="flex-1">
                       <p className="text-sm">
-                        <strong>{feat.name}</strong>
-                        {feat.prerequisite && (
+                        <strong>{fd.name}</strong>
+                        {fd.prerequisite && (
                           <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                            {tr("wizard.feats.req")} {feat.prerequisite}
+                            {tr("wizard.feats.req")} {fd.prerequisite}
                           </span>
                         )}
                         {(reservedAsRacial || reservedElsewhere) && (
@@ -3051,7 +3059,7 @@ function AsiSlot({
                         )}
                       </p>
                       <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                        {feat.summary}
+                        {fd.summary}
                       </p>
                     </div>
                     <input
@@ -3064,7 +3072,7 @@ function AsiSlot({
                   </label>
                   {picked && (
                     <ul className="mt-3 space-y-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                      {feat.grants.map((line, i) => (
+                      {fd.grants.map((line, i) => (
                         <li key={i}>· {line}</li>
                       ))}
                     </ul>

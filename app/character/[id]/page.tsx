@@ -4,7 +4,9 @@ import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
 import {
   ABILITIES,
-  ABILITY_LABEL,
+  BACKGROUNDS,
+  CLASSES,
+  RACES,
   SKILLS,
   abilityMod,
   CharacterSchema,
@@ -14,16 +16,50 @@ import {
   proficiencyBonus,
   savingThrow,
   skillBonus,
+  type Character,
 } from "@/lib/character";
 import { findFeat } from "@/lib/feats";
 import { SpellDailyPrep } from "./SpellDailyPrep";
 import { getGlobalSettings } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/t";
-import { displayRaceName } from "@/lib/i18n/race-labels";
+import {
+  featForLocale,
+  localizeGamePhrase,
+  localizedAbilityLabel,
+  localizedBackgroundBasics,
+  localizedClassBasics,
+  localizedRaceBasics,
+  localizedRaceVariant,
+  localizedSkillLabel,
+} from "@/lib/i18n/game-localize";
 import { spellForLocale } from "@/lib/i18n/spell-i18n";
 import { findSpellByName } from "@/lib/spells";
+import type { AppLocale } from "@/lib/i18n/locale";
 
 export const dynamic = "force-dynamic";
+
+function lineageSubtitle(
+  ch: Character,
+  locale: AppLocale,
+  tr: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  const race = RACES.find((r) => r.id === ch.race);
+  let raceDisp = ch.race;
+  if (race) {
+    const rb = localizedRaceBasics(race, locale);
+    if (ch.subrace && race.variants) {
+      const v = race.variants.find((x) => x.id === ch.subrace);
+      raceDisp = v ? `${rb.label} (${localizedRaceVariant(v, race.id, locale).label})` : rb.label;
+    } else {
+      raceDisp = rb.label;
+    }
+  }
+  const klass = CLASSES.find((c) => c.id === ch.class);
+  const classDisp = klass ? localizedClassBasics(klass, locale).label : ch.class;
+  const bg = BACKGROUNDS.find((b) => b.id === ch.background);
+  const bgDisp = bg ? localizedBackgroundBasics(bg, locale).label : ch.background;
+  return `${raceDisp} · ${classDisp} ${tr("characterSheet.levelWord")} ${ch.level} · ${bgDisp}`;
+}
 
 export default async function CharacterPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -59,11 +95,11 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             </p>
           )}
           <p className="mt-1" style={{ color: "var(--color-text-secondary)" }}>
-            {displayRaceName(ch.race, locale)} · {ch.class} {tr("characterSheet.levelWord")} {ch.level} · {ch.background}
+            {lineageSubtitle(ch, locale, tr)}
           </p>
         </div>
         <div className="flex gap-2">
-          <Link href={`/api/character/${ch.id}/pdf`} className="btn-ghost" prefetch={false}>
+          <Link href={`/api/character/${ch.id}/pdf?locale=${locale}`} className="btn-ghost" prefetch={false}>
             {tr("characterSheet.exportPdf")}
           </Link>
           <Link href={`/character/${ch.id}/edit`} className="btn-ghost">
@@ -93,7 +129,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             {ABILITIES.map((a) => (
               <li key={a} className="flex justify-between">
                 <span>
-                  {ch.savingThrows.includes(a) ? "●" : "○"} {ABILITY_LABEL[a]}
+                  {ch.savingThrows.includes(a) ? "●" : "○"} {localizedAbilityLabel(a, locale)}
                 </span>
                 <span style={{ fontFamily: "var(--font-display)" }}>{fmt(savingThrow(ch, a))}</span>
               </li>
@@ -136,7 +172,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             {Object.entries(SKILLS).map(([key, s]) => (
               <li key={key} className="flex items-center justify-between">
                 <span style={{ color: ch.skills.includes(key) ? "var(--color-text-primary)" : "var(--color-text-hint)" }}>
-                  {ch.skills.includes(key) ? "●" : "○"} {s.label}
+                  {ch.skills.includes(key) ? "●" : "○"} {localizedSkillLabel(key, locale)}
                 </span>
                 <span style={{ fontFamily: "var(--font-display)" }}>{fmt(skillBonus(ch, key))}</span>
               </li>
@@ -151,7 +187,9 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
           <div className="mb-3 flex items-center justify-between">
             <p className="label">Conjuros</p>
             {ch.spells.ability && (
-              <span className="badge">Atributo: {ABILITY_LABEL[ch.spells.ability]}</span>
+              <span className="badge">
+                {tr("characterSheet.spellAbility")}: {localizedAbilityLabel(ch.spells.ability, locale)}
+              </span>
             )}
           </div>
           {Object.keys(ch.spells.slots).length > 0 && (
@@ -184,55 +222,63 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
 
       {ch.asiChoices.length > 0 && (
         <div className="mt-6 card">
-          <p className="label mb-3">Mejoras de nivel (PHB)</p>
+          <p className="label mb-3">{tr("characterSheet.asiSection")}</p>
           <ol className="list-decimal space-y-2 pl-5 text-sm">
-            {ch.asiChoices.map((c, i) => (
-              <li key={i}>
-                {c.kind === "asi" ? (
-                  <>
-                    <strong>ASI</strong>:{" "}
-                    {c.picks.length === 1
-                      ? `+2 a ${ABILITY_LABEL[c.picks[0]!]}`
-                      : `+1 a ${ABILITY_LABEL[c.picks[0]!]}, +1 a ${ABILITY_LABEL[c.picks[1]!]}`}
-                  </>
-                ) : (
-                  <>
-                    <strong>Dote</strong>: {findFeat(c.featId)?.name ?? c.featId}
-                    {c.abilityChoice && (
-                      <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        (atributo: {ABILITY_LABEL[c.abilityChoice]})
-                      </span>
-                    )}
-                  </>
-                )}
-              </li>
-            ))}
+            {ch.asiChoices.map((c, i) => {
+              const pickedFeat = c.kind === "feat" && c.featId ? findFeat(c.featId) : undefined;
+              return (
+                <li key={i}>
+                  {c.kind === "asi" ? (
+                    <>
+                      <strong>{tr("characterSheet.asiAbbr")}</strong>:{" "}
+                      {c.picks.length === 1
+                        ? tr("characterSheet.asiPlusTwo", { a: localizedAbilityLabel(c.picks[0]!, locale) })
+                        : tr("characterSheet.asiPlusSplit", {
+                            a: localizedAbilityLabel(c.picks[0]!, locale),
+                            b: localizedAbilityLabel(c.picks[1]!, locale),
+                          })}
+                    </>
+                  ) : (
+                    <>
+                      <strong>{tr("characterSheet.featAbbr")}</strong>:{" "}
+                      {pickedFeat ? featForLocale(pickedFeat, locale).name : c.featId}
+                      {c.abilityChoice && (
+                        <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
+                          ({tr("characterSheet.attrChoice")}: {localizedAbilityLabel(c.abilityChoice, locale)})
+                        </span>
+                      )}
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}
 
       {ch.feats.length > 0 && (
         <div className="mt-6 card">
-          <p className="label mb-3">Dotes</p>
+          <p className="label mb-3">{tr("characterSheet.featsSection")}</p>
           <ul className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
             {ch.feats.map((id) => {
               const feat = findFeat(id);
               if (!feat) return null;
+              const fd = featForLocale(feat, locale);
               return (
                 <li key={id}>
                   <p>
-                    <strong>{feat.name}</strong>
-                    {feat.prerequisite && (
+                    <strong>{fd.name}</strong>
+                    {fd.prerequisite && (
                       <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        Req: {feat.prerequisite}
+                        {tr("characterSheet.req")} {fd.prerequisite}
                       </span>
                     )}
                   </p>
                   <p className="mt-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                    {feat.summary}
+                    {fd.summary}
                   </p>
                   <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    {feat.grants.map((line, i) => (
+                    {fd.grants.map((line, i) => (
                       <li key={i}>· {line}</li>
                     ))}
                   </ul>
@@ -248,7 +294,10 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
           <p className="label mb-3">Equipamiento</p>
           <ul className="space-y-1 text-sm">
             {ch.equipment.map((it, i) => (
-              <li key={i}>· {it.qty > 1 ? it.qty + " × " : ""}{it.name}</li>
+              <li key={i}>
+                · {it.qty > 1 ? it.qty + " × " : ""}
+                {localizeGamePhrase(it.name, locale)}
+              </li>
             ))}
           </ul>
           <div className="my-4 divider" />
