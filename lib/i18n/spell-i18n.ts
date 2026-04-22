@@ -3,6 +3,7 @@ import { normalizeLocale } from "./locale";
 import type { Spell, SpellClassId } from "../spells";
 import { spellsForClassUpToLevel } from "../spells";
 import { SPELL_EN_OVERRIDES } from "./spell-en-overrides";
+import { SPELL_NAME_EN_BY_ID } from "./data/spell-names-en";
 
 function idToEnglishTitle(id: string): string {
   return id
@@ -18,7 +19,7 @@ export function spellForLocale(spell: Spell, locale: AppLocale | undefined): Spe
   const o = SPELL_EN_OVERRIDES[spell.id];
   return {
     ...spell,
-    name: o?.name ?? idToEnglishTitle(spell.id),
+    name: o?.name ?? SPELL_NAME_EN_BY_ID[spell.id] ?? idToEnglishTitle(spell.id),
     description: o?.description ?? spell.description,
   };
 }

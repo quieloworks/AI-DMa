@@ -11,7 +11,6 @@ import {
 import { useRouter } from "next/navigation";
 import {
   ABILITIES,
-  ABILITY_LABEL,
   BACKGROUNDS,
   CLASSES,
   RACES,
@@ -45,7 +44,21 @@ import {
 } from "@/lib/character";
 import { SPELLS, spellsForClassAtLevel, spellsForClassUpToLevel, type Spell, type SpellClassId } from "@/lib/spells";
 import { FEATS, type Feat } from "@/lib/feats";
-import { useTranslations } from "@/components/LocaleProvider";
+import { useLocale, useTranslations } from "@/components/LocaleProvider";
+import {
+  localizeGamePhrase,
+  localizedBackgroundBasics,
+  localizedClassBasics,
+  localizedRaceBasics,
+  localizedRaceVariant,
+  localizedAbilityLabel,
+  localizedSkillLabel,
+  localizedSpellSchool,
+  localizedFightingStyle,
+} from "@/lib/i18n/game-localize";
+import { spellForLocale, spellSortLocale } from "@/lib/i18n/spell-i18n";
+import type { AppLocale } from "@/lib/i18n/locale";
+import { displayLanguageName } from "@/lib/i18n/language-names";
 
 type Step =
   | "race"
@@ -63,6 +76,13 @@ type Step =
 type AbilityMethod = "standard" | "pointbuy" | "roll";
 type MoneyMethod = "fixed" | "rolled";
 
+const ALIGNMENT_CODES = ["LG", "NG", "CG", "LN", "N", "CN", "LE", "NE", "CE"] as const;
+
+function alignmentLabel(code: string, tr: (path: string, vars?: Record<string, string | number>) => string): string {
+  if ((ALIGNMENT_CODES as readonly string[]).includes(code)) return tr(`wizard.alignment.${code}`);
+  return code;
+}
+
 // ASI vs dote a los niveles 4/8/12/16/19 (más 6/14 guerrero, 10 pícaro). PHB p. 15 y tablas de clase.
 // - kind "none": slot sin decidir (inválido para avanzar).
 // - kind "asi":   `picks` = [ability] para +2 al mismo atributo, o [a1, a2] distintos para +1 cada uno.
@@ -73,6 +93,7 @@ export type AsiChoice = AsiSlotChoice | { kind: "none" };
 export function CharacterWizard() {
   const router = useRouter();
   const tr = useTranslations();
+  const locale = useLocale();
   const STEPS = useMemo(() => {
     const meta: [Step, string][] = [
       ["race", "wizard.step.race"],
@@ -107,7 +128,7 @@ export function CharacterWizard() {
   const [chosenLanguages, setChosenLanguages] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [playerName, setPlayerName] = useState("");
-  const [alignment, setAlignment] = useState("Neutral");
+  const [alignment, setAlignment] = useState<string>("N");
   const [level, setLevel] = useState(1);
   const [chosenCantrips, setChosenCantrips] = useState<string[]>([]);
   const [chosenSpells, setChosenSpells] = useState<string[]>([]);
@@ -381,10 +402,11 @@ export function CharacterWizard() {
     const allLanguages = mergeUnique(baseLangs, chosenLanguages);
     const fightingStyleFeatures = chosenFightingStyles.map((fid) => {
       const st = FIGHTING_STYLES.find((x) => x.id === fid);
+      const stL = st ? localizedFightingStyle(st, locale) : null;
       return {
-        name: st ? `Estilo de combate: ${st.label}` : "Estilo de combate",
-        source: klass.label,
-        text: st?.summary ?? "",
+        name: stL ? `${tr("wizard.fightingStyle.savePrefix")}: ${stL.label}` : tr("wizard.fightingStyle.saveFallback"),
+        source: localizedClassBasics(klass, locale).label,
+        text: stL?.summary ?? "",
       };
     });
 
@@ -450,6 +472,7 @@ export function CharacterWizard() {
                       caster: klass.spellcasting.caster,
                     }
                   : undefined,
+              locale,
             }),
             slots: Object.fromEntries(spellSlotsFor(klass.spellcasting.caster, level).map((n, i) => [String(i + 1), { max: n, used: 0 }])),
           }
@@ -463,10 +486,18 @@ export function CharacterWizard() {
                 ...(race.grantedCantrips ?? []),
                 ...(variant?.grantedCantrips ?? []),
               ],
+              locale,
             }),
             slots: {},
           },
-      features: [{ name: background.feature.name, source: background.label, text: background.feature.text }, ...fightingStyleFeatures],
+      features: [
+        {
+          name: localizedBackgroundBasics(background, locale).feature.name,
+          source: localizedBackgroundBasics(background, locale).label,
+          text: localizedBackgroundBasics(background, locale).feature.text,
+        },
+        ...fightingStyleFeatures,
+      ],
       feats: [
         ...chosenFeats,
         ...asiChoices.flatMap((c) => (c.kind === "feat" ? [c.featId] : [])),
@@ -805,6 +836,7 @@ export function CharacterWizard() {
                         caster: klass.spellcasting.caster,
                       }
                     : undefined,
+                locale,
               })}
             />
           )}
@@ -843,12 +875,12 @@ export function CharacterWizard() {
                 </>
               )}
               <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.race")}</dt>
-              <dd>{race?.label ?? tr("common.empty")}
+              <dd>{race ? localizedRaceBasics(race, locale).label : tr("common.empty")}
                 {variant ? ` · ${variant.label}` : ""}</dd>
               <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.class")}</dt>
-              <dd>{klass?.label ?? tr("common.empty")}</dd>
+              <dd>{klass ? localizedClassBasics(klass, locale).label : tr("common.empty")}</dd>
               <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.background")}</dt>
-              <dd>{background?.label ?? tr("common.empty")}</dd>
+              <dd>{background ? localizedBackgroundBasics(background, locale).label : tr("common.empty")}</dd>
               <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.level")}</dt>
               <dd>{level}</dd>
               <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.maxHp")}</dt>
@@ -934,6 +966,7 @@ function RaceStep({
   setCustomAbilityPicks: (a: Ability[]) => void;
 }) {
   const tr = useTranslations();
+  const locale = useLocale();
   const toggleHalfElf = (a: Ability) => {
     if (a === "car") return;
     const next = new Set(halfElfBonus);
@@ -958,8 +991,10 @@ function RaceStep({
   return (
     <div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {RACES.map((r) => (
-          <button key={r.id} onClick={() => onPick(r)} className={r.id === race?.id ? "card-accent text-left" : "card text-left"}>
+        {RACES.map((raw) => {
+          const r = localizedRaceBasics(raw, locale);
+          return (
+          <button key={r.id} onClick={() => onPick(raw)} className={r.id === race?.id ? "card-accent text-left" : "card text-left"}>
             <h3 className="mb-1">{r.label}</h3>
             <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
               {tr("wizard.race.speed")} {r.speed} ·{" "}
@@ -979,14 +1014,15 @@ function RaceStep({
               </p>
             )}
           </button>
-        ))}
+          );
+        })}
       </div>
       {race?.variants && race.variants.length > 0 && (
         <div className="mt-5 card">
           <div className="mb-3 flex items-center justify-between">
             <p className="label">
               {tr("wizard.race.pickSubrace", {
-                label: race.variantLabel ?? tr("wizard.race.subraceDefault"),
+                label: localizedRaceBasics(race, locale).variantLabel ?? tr("wizard.race.subraceDefault"),
               })}
             </p>
             <span className="badge" style={{ color: variantId ? "var(--color-accent)" : undefined }}>
@@ -994,7 +1030,8 @@ function RaceStep({
             </span>
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            {race.variants.map((v) => {
+            {race.variants.map((vr) => {
+              const v = localizedRaceVariant(vr, race.id, locale);
               const picked = v.id === variantId;
               const bonus = v.abilityBonus
                 ? Object.entries(v.abilityBonus)
@@ -1095,28 +1132,40 @@ function RaceStep({
 }
 
 function ClassStep({ klass, onPick }: { klass: ClassBasics | null; onPick: (c: ClassBasics) => void }) {
+  const tr = useTranslations();
+  const locale = useLocale();
+  function casterLabel(caster: NonNullable<ClassBasics["spellcasting"]>["caster"]): string {
+    return tr(`wizard.class.caster.${caster}`);
+  }
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-      {CLASSES.map((c) => (
-        <button key={c.id} onClick={() => onPick(c)} className={c.id === klass?.id ? "card-accent text-left" : "card text-left"}>
+      {CLASSES.map((raw) => {
+        const c = localizedClassBasics(raw, locale);
+        const goldExpr = `${raw.startingGoldDice.dice}d${raw.startingGoldDice.faces}${raw.startingGoldDice.multiplier > 1 ? `×${raw.startingGoldDice.multiplier}` : ""}`;
+        return (
+        <button key={raw.id} onClick={() => onPick(raw)} className={raw.id === klass?.id ? "card-accent text-left" : "card text-left"}>
           <div className="flex items-center justify-between">
             <h3>{c.label}</h3>
-            <span className="badge">d{c.hitDie}</span>
+            <span className="badge">d{raw.hitDie}</span>
           </div>
           <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            Principal: {c.primaryAbility.map((a) => ABILITY_LABEL[a]).join("/")} · Salv: {c.savingThrows.map((a) => ABILITY_LABEL[a]).join(", ")}
+            {tr("wizard.class.primary")}: {raw.primaryAbility.map((a) => localizedAbilityLabel(a, locale)).join("/")} · {tr("wizard.class.saves")}:{" "}
+            {raw.savingThrows.map((a) => localizedAbilityLabel(a, locale)).join(", ")}
           </p>
           <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            {c.skillChoices.count} habilidades a elegir · Oro inicial {c.startingGoldDice.dice}d{c.startingGoldDice.faces}
-            {c.startingGoldDice.multiplier > 1 ? `×${c.startingGoldDice.multiplier}` : ""}
+            {tr("wizard.class.skillsPick", { n: raw.skillChoices.count })} · {tr("wizard.class.startingGold", { expr: goldExpr })}
           </p>
-          {c.spellcasting && (
+          {raw.spellcasting && (
             <p className="mt-2 text-xs" style={{ color: "var(--color-accent)" }}>
-              Conjuros ({c.spellcasting.caster}) · {ABILITY_LABEL[c.spellcasting.ability]}
+              {tr("wizard.class.spellLine", {
+                caster: casterLabel(raw.spellcasting.caster),
+                ability: localizedAbilityLabel(raw.spellcasting.ability, locale),
+              })}
             </p>
           )}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1136,6 +1185,8 @@ function BackgroundStep({
   chosenLanguages: string[];
   setChosenLanguages: (ls: string[]) => void;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const toggleLang = (lang: string) => {
     const next = new Set(chosenLanguages);
     if (next.has(lang)) next.delete(lang);
@@ -1148,35 +1199,43 @@ function BackgroundStep({
   return (
     <div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {BACKGROUNDS.map((b) => (
-          <button key={b.id} onClick={() => onPick(b)} className={b.id === bg?.id ? "card-accent text-left" : "card text-left"}>
+        {BACKGROUNDS.map((raw) => {
+          const b = localizedBackgroundBasics(raw, locale);
+          return (
+          <button key={raw.id} onClick={() => onPick(raw)} className={raw.id === bg?.id ? "card-accent text-left" : "card text-left"}>
             <h3>{b.label}</h3>
             <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-              Habilidades: {b.skillProficiencies.map((s) => SKILLS[s]?.label ?? s).join(", ")} · {b.startingMoney.gp} po
-              {b.languages > 0 ? ` · +${b.languages} idioma${b.languages === 1 ? "" : "s"}` : ""}
+              {tr("wizard.background.skillsPrefix")}{" "}
+              {raw.skillProficiencies.map((s) => localizedSkillLabel(s, locale)).join(", ")} ·{" "}
+              {tr("wizard.background.gpSuffix", { n: raw.startingMoney.gp })}
+              {raw.languages > 0
+                ? ` · ${raw.languages === 1 ? tr("wizard.background.extraLangOne", { n: raw.languages }) : tr("wizard.background.extraLangMany", { n: raw.languages })}`
+                : ""}
             </p>
             <p className="mt-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>
               <strong>{b.feature.name}</strong>: {b.feature.text}
             </p>
           </button>
-        ))}
+          );
+        })}
       </div>
       {bg && extraLanguageCount > 0 && (
         <div className="mt-5 card">
           <div className="mb-3 flex items-center justify-between">
-            <p className="label">Idiomas adicionales: elige {extraLanguageCount}</p>
+            <p className="label">{tr("wizard.background.pickLangTitle", { n: extraLanguageCount })}</p>
             <span className="badge" style={{ color: chosenLanguages.length === extraLanguageCount ? "var(--color-accent)" : undefined }}>
               {chosenLanguages.length}/{extraLanguageCount}
             </span>
           </div>
           <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            Combinamos los idiomas raciales, de subraza y de trasfondo. No puedes elegir uno que ya hables.
+            {tr("wizard.background.pickLangHint")}
           </p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             {STANDARD_LANGUAGES.map((lang) => {
               const alreadyKnown = knownLanguagesSet.has(lang);
               const checked = chosenLanguages.includes(lang);
               const disabled = alreadyKnown || (!checked && chosenLanguages.length >= extraLanguageCount);
+              const langDisp = displayLanguageName(lang, locale);
               return (
                 <label
                   key={lang}
@@ -1184,10 +1243,10 @@ function BackgroundStep({
                   style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: alreadyKnown ? 0.45 : 1, padding: "10px 12px" }}
                 >
                   <span className="text-sm">
-                    {lang}
+                    {langDisp}
                     {alreadyKnown && (
                       <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        · ya lo hablas
+                        · {tr("wizard.background.alreadyKnown")}
                       </span>
                     )}
                   </span>
@@ -1219,6 +1278,8 @@ function AbilitiesStep({
   setRolled: (r: number[]) => void;
   race: RaceBasics | null;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const pbTotal = pointBuyTotal(abilities);
 
   function rollManual() {
@@ -1265,7 +1326,7 @@ function AbilitiesStep({
       <div className="flex flex-wrap gap-2">
         {(["standard", "pointbuy", "roll"] as AbilityMethod[]).map((m) => (
           <button key={m} onClick={() => setMethod(m)} className={method === m ? "btn-accent" : "btn-ghost"}>
-            {m === "standard" ? "Array estándar" : m === "pointbuy" ? "Point buy" : "Tirada de dados"}
+            {m === "standard" ? tr("wizard.abilities.standard") : m === "pointbuy" ? tr("wizard.abilities.pointbuy") : tr("wizard.abilities.roll")}
           </button>
         ))}
       </div>
@@ -1273,8 +1334,7 @@ function AbilitiesStep({
       {method === "standard" && (
         <div>
           <p className="mb-3 text-sm" style={{ color: "var(--color-text-secondary)" }}>
-            Asigna los valores {STANDARD_ARRAY.join(", ")} a cada atributo. Un valor que ya hayas usado desaparece de las demás listas
-            hasta que lo liberes eligiendo "—".
+            {tr("wizard.abilities.standardHelp", { values: STANDARD_ARRAY.join(", ") })}
           </p>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             {ABILITIES.map((a) => {
@@ -1305,9 +1365,9 @@ function AbilitiesStep({
         <div>
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-              Tienes 27 puntos. Rango 8–15 antes de bonos raciales.
+              {tr("wizard.abilities.pointbuyLead")}
             </p>
-            <span className="badge">Gastados: {pbTotal}/27</span>
+            <span className="badge">{tr("wizard.abilities.pointbuySpent", { spent: pbTotal })}</span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             {ABILITIES.map((a) => (
@@ -1338,12 +1398,12 @@ function AbilitiesStep({
         <div>
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <button className="btn-accent" onClick={rollManual}>
-              {rolled.length ? "Volver a tirar" : "Tirar 4d6 (descartar menor) × 6"}
+              {rolled.length ? tr("wizard.abilities.rollAgain") : tr("wizard.abilities.rollButton")}
             </button>
             <span className="text-sm" style={{ color: "var(--color-text-hint)" }}>
               {rolled.length
-                ? `Tiradas: ${[...rolled].sort((a, b) => b - a).join(", ")}`
-                : "Sin tiradas aún"}
+                ? tr("wizard.abilities.rollsLabel", { rolls: [...rolled].sort((a, b) => b - a).join(", ") })
+                : tr("wizard.abilities.noRollsYet")}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -1371,7 +1431,7 @@ function AbilitiesStep({
           </div>
           {rolled.length > 0 && (
             <p className="mt-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-              Cada valor rola solo una vez salvo que salgan duplicados en las tiradas. Pon un atributo en "—" para volver a usar su valor.
+              {tr("wizard.abilities.rollHelp")}
             </p>
           )}
         </div>
@@ -1409,13 +1469,20 @@ function SkillsStep({
   bgToolPicks: string[];
   setBgToolPicks: Dispatch<SetStateAction<string[]>>;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const bgSkills = new Set(bg?.skillProficiencies ?? []);
   const classList = new Set(klass?.skillChoices.from ?? []);
   const picked = new Set(skills);
   const classPicks = skills.filter((s) => !bgSkills.has(s));
   const limit = klass?.skillChoices.count ?? 0;
   const remaining = Math.max(0, limit - classPicks.length);
-  const bonusSource = variant?.bonusSkills ? (variant.label ?? race?.label) : race?.label;
+  const bonusSource =
+    variant?.bonusSkills && race
+      ? localizedRaceVariant(variant, race.id, locale).label ?? localizedRaceBasics(race, locale).label
+      : race
+        ? localizedRaceBasics(race, locale).label
+        : "";
 
   const toggle = (key: string) => {
     if (bgSkills.has(key)) return;
@@ -1442,10 +1509,13 @@ function SkillsStep({
   if (!klass || !bg) {
     return (
       <p className="text-sm" style={{ color: "var(--color-text-hint)" }}>
-        Selecciona clase y trasfondo antes de elegir habilidades.
+        {tr("wizard.skills.needClassBg")}
       </p>
     );
   }
+
+  const klassUi = localizedClassBasics(klass, locale);
+  const bgUi = localizedBackgroundBasics(bg, locale);
 
   const bonusPicksRemaining = Math.max(0, racialBonusSkills - bonusSkills.length);
   const bgToolSpecs = backgroundToolPickSpecs(bg);
@@ -1464,7 +1534,11 @@ function SkillsStep({
     <div>
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-          Tu trasfondo cubre {bg.skillProficiencies.length} habilidades. Elige {limit} habilidades de la lista de {klass.label}.
+          {tr("wizard.skills.intro", {
+            bgCount: bg.skillProficiencies.length,
+            limit,
+            classLabel: klassUi.label,
+          })}
         </p>
         <span className="badge" style={{ color: remaining === 0 ? "var(--color-accent)" : undefined }}>
           {classPicks.length}/{limit}
@@ -1476,7 +1550,7 @@ function SkillsStep({
           const inClass = classList.has(key);
           const checked = fromBg || picked.has(key);
           const disabled = fromBg || !inClass || (!checked && remaining === 0);
-          const label = fromBg ? "trasfondo" : inClass ? "clase" : "no disponible";
+          const label = fromBg ? tr("wizard.skills.tagBackground") : inClass ? tr("wizard.skills.tagClass") : tr("wizard.skills.tagUnavailable");
           const color = fromBg
             ? "var(--color-accent)"
             : inClass
@@ -1489,9 +1563,9 @@ function SkillsStep({
               style={{ opacity: !inClass && !fromBg ? 0.55 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
             >
               <div>
-                <p className="text-sm">{s.label}</p>
+                <p className="text-sm">{localizedSkillLabel(key, locale)}</p>
                 <p className="text-xs" style={{ color }}>
-                  {ABILITY_LABEL[s.ability]} · {label}
+                  {localizedAbilityLabel(s.ability, locale)} · {label}
                 </p>
               </div>
               <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggle(key)} />
@@ -1504,7 +1578,7 @@ function SkillsStep({
         <div className="mt-6">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-              Versatilidad de habilidades ({bonusSource}): elige {racialBonusSkills} habilidad{racialBonusSkills === 1 ? "" : "es"} adicional{racialBonusSkills === 1 ? "" : "es"} a tu elección.
+              {tr("wizard.skills.racialIntro", { source: bonusSource, n: racialBonusSkills })}
             </p>
             <span className="badge" style={{ color: bonusPicksRemaining === 0 ? "var(--color-accent)" : undefined }}>
               {bonusSkills.length}/{racialBonusSkills}
@@ -1522,10 +1596,10 @@ function SkillsStep({
                   style={{ opacity: alreadyChosen ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
                 >
                   <div>
-                    <p className="text-sm">{s.label}</p>
+                    <p className="text-sm">{localizedSkillLabel(key, locale)}</p>
                     <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                      {ABILITY_LABEL[s.ability]}
-                      {alreadyChosen ? " · ya seleccionada" : " · racial"}
+                      {localizedAbilityLabel(s.ability, locale)}
+                      {alreadyChosen ? ` · ${tr("wizard.skills.racialTaken")}` : ` · ${tr("wizard.skills.racialPool")}`}
                     </p>
                   </div>
                   <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleBonus(key)} />
@@ -1538,12 +1612,12 @@ function SkillsStep({
 
       {(rule || bgToolSpecs.length > 0) && (
         <div className="mt-8 space-y-6">
-          <p className="label">Competencias en herramientas (PHB cap. 5)</p>
+          <p className="label">{tr("wizard.skills.toolsTitle")}</p>
           {rule?.pool === "instruments" && (
             <div className="card">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                  {klass.label}: elige {rule.count} instrumentos musicales distintos.
+                  {tr("wizard.skills.instrumentsPick", { classLabel: klassUi.label, count: rule.count })}
                 </p>
                 <span className="badge" style={{ color: classToolPicks.length === rule.count ? "var(--color-accent)" : undefined }}>
                   {classToolPicks.length}/{rule.count}
@@ -1559,7 +1633,7 @@ function SkillsStep({
                       className={checked ? "card-accent flex items-center justify-between py-2" : "card flex items-center justify-between py-2"}
                       style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
                     >
-                      <span className="text-sm">{inst}</span>
+                      <span className="text-sm">{localizeGamePhrase(inst, locale)}</span>
                       <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleClassInstrument(inst)} />
                     </label>
                   );
@@ -1571,17 +1645,17 @@ function SkillsStep({
             <div className="card">
               <label className="block">
                 <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                  {klass.label}: una herramienta de artesano o un instrumento musical (a elección).
+                  {tr("wizard.skills.artisanOrInstrument", { classLabel: klassUi.label })}
                 </span>
                 <select
                   className="input mt-2 w-full max-w-md"
                   value={classToolPicks[0] ?? ""}
                   onChange={(e) => setClassToolPicks(e.target.value ? [e.target.value] : [])}
                 >
-                  <option value="">— Elige —</option>
+                  <option value="">{tr("wizard.skills.choosePlaceholder")}</option>
                   {toolsInPool("artisan-or-instrument").map((t) => (
                     <option key={t} value={t}>
-                      {t}
+                      {localizeGamePhrase(t, locale)}
                     </option>
                   ))}
                 </select>
@@ -1591,11 +1665,11 @@ function SkillsStep({
           {bgToolSpecs.length > 0 && (
             <div className="card space-y-4">
               <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                Trasfondo ({bg.label}): concreta las competencias genéricas del PHB.
+                {tr("wizard.skills.bgToolsTitle", { label: bgUi.label })}
               </p>
               {bgToolSpecs.map((spec, i) => (
                 <label key={`${bg.id}-tool-${i}`} className="block">
-                  <span className="label">Elección {i + 1}</span>
+                  <span className="label">{tr("wizard.skills.bgToolsChoice", { n: i + 1 })}</span>
                   <select
                     className="input mt-2 w-full max-w-md"
                     value={bgToolPicks[i] ?? ""}
@@ -1609,10 +1683,10 @@ function SkillsStep({
                       });
                     }}
                   >
-                    <option value="">— Elige —</option>
+                    <option value="">{tr("wizard.skills.choosePlaceholder")}</option>
                     {toolsInPool(spec.pool).map((t) => (
                       <option key={t} value={t}>
-                        {t}
+                        {localizeGamePhrase(t, locale)}
                       </option>
                     ))}
                   </select>
@@ -1655,6 +1729,7 @@ function DetailsStep({
   hpLevelRolls: number[];
   setHpLevelRolls: Dispatch<SetStateAction<number[]>>;
 }) {
+  const tr = useTranslations();
   const hd = klass.hitDie;
   function rollOne(idx: number) {
     const v = Math.floor(Math.random() * hd) + 1;
@@ -1679,11 +1754,11 @@ function DetailsStep({
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label className="block">
-          <span className="label">Nombre del personaje</span>
+          <span className="label">{tr("wizard.details.characterName")}</span>
           <input className="input mt-2" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Arannis Soldrake" />
         </label>
         <label className="block">
-          <span className="label">Nombre del jugador (real)</span>
+          <span className="label">{tr("wizard.details.playerName")}</span>
           <input
             className="input mt-2"
             value={playerName}
@@ -1692,24 +1767,16 @@ function DetailsStep({
           />
         </label>
         <label className="block">
-          <span className="label">Nivel</span>
+          <span className="label">{tr("wizard.details.level")}</span>
           <input className="input mt-2" type="number" min={1} max={20} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
         </label>
         <label className="block">
-          <span className="label">Alineamiento</span>
+          <span className="label">{tr("wizard.details.alignment")}</span>
           <select className="input mt-2" value={alignment} onChange={(e) => setAlignment(e.target.value)}>
-            {[
-              "Legal bueno",
-              "Neutral bueno",
-              "Caótico bueno",
-              "Legal neutral",
-              "Neutral",
-              "Caótico neutral",
-              "Legal malvado",
-              "Neutral malvado",
-              "Caótico malvado",
-            ].map((a) => (
-              <option key={a}>{a}</option>
+            {ALIGNMENT_CODES.map((code) => (
+              <option key={code} value={code}>
+                {tr(`wizard.alignment.${code}`)}
+              </option>
             ))}
           </select>
         </label>
@@ -1717,9 +1784,9 @@ function DetailsStep({
 
       {level > 1 && (
         <div className="card">
-          <p className="label mb-2">Puntos de golpe (PHB p. 15)</p>
+          <p className="label mb-2">{tr("wizard.details.hpTitle")}</p>
           <p className="mb-4 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            Nivel 1: máximo del dado de golpe de tu clase (d{hd}) + mod de CON. A partir del nivel 2, cada subida suma una tirada del mismo dado + mod de CON, o el valor fijo de «promedio» del manual.
+            {tr("wizard.details.hpHint", { hd })}
           </p>
           <div className="mb-4 flex flex-wrap gap-2">
             <button
@@ -1727,10 +1794,10 @@ function DetailsStep({
               className={hpGeneration === "average" ? "btn-accent" : "btn-ghost"}
               onClick={() => setHpGeneration("average")}
             >
-              Promedio PHB
+              {tr("wizard.details.hpAverage")}
             </button>
             <button type="button" className={hpGeneration === "rolled" ? "btn-accent" : "btn-ghost"} onClick={() => setHpGeneration("rolled")}>
-              Tiradas manuales
+              {tr("wizard.details.hpRolled")}
             </button>
           </div>
           {hpGeneration === "rolled" && (
@@ -1738,7 +1805,7 @@ function DetailsStep({
               {hpLevelRolls.map((roll, i) => (
                 <div key={i} className="card flex flex-col gap-2 py-3">
                   <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                    Subida a nivel {i + 2} (d{hd})
+                    {tr("wizard.details.levelUpRoll", { n: i + 2, hd })}
                   </p>
                   <div className="flex items-center gap-2">
                     <input
@@ -1750,7 +1817,7 @@ function DetailsStep({
                       onChange={(e) => setRoll(i, e.target.value)}
                     />
                     <button type="button" className="btn-ghost text-sm" onClick={() => rollOne(i)}>
-                      Tirar
+                      {tr("wizard.details.rollOnce")}
                     </button>
                   </div>
                 </div>
@@ -1776,6 +1843,8 @@ function FightingStyleStep({
   chosen: string[];
   setChosen: (ids: string[]) => void;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   function pick(id: string) {
     if (styleSlots <= 1) {
       setChosen(chosen[0] === id ? [] : [id]);
@@ -1787,13 +1856,18 @@ function FightingStyleStep({
     setChosen(Array.from(set));
   }
 
+  const klassUi = localizedClassBasics(klass, locale);
+  const phrase =
+    styleSlots === 1 ? tr("wizard.fightingStyle.oneStyle") : tr("wizard.fightingStyle.nStyles", { n: styleSlots });
+
   return (
     <div>
       <p className="mb-4 text-sm" style={{ color: "var(--color-text-secondary)" }}>
-        Tu clase ({klass.label}) obtiene {styleSlots === 1 ? "un estilo de combate" : `${styleSlots} estilos de combate`} según el PHB: elige de la lista.
+        {tr("wizard.fightingStyle.intro", { label: klassUi.label, phrase })}
       </p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {options.map((s) => {
+        {options.map((raw) => {
+          const s = localizedFightingStyle(raw, locale);
           const active = chosen.includes(s.id);
           return (
             <button key={s.id} type="button" onClick={() => pick(s.id)} className={active ? "card-accent text-left" : "card text-left"}>
@@ -1806,7 +1880,7 @@ function FightingStyleStep({
         })}
       </div>
       <p className="mt-4 text-xs" style={{ color: "var(--color-text-hint)" }}>
-        Elige {styleSlots} opción{styleSlots === 1 ? "" : "es"}. La CA con el estilo Defensa sólo suma si llevas armadura corporal (PHB).
+        {tr("wizard.fightingStyle.footer", { n: styleSlots })}
       </p>
     </div>
   );
@@ -1839,13 +1913,17 @@ function EquipmentStep({
   goldRolls: number[];
   setGoldRolls: (r: number[]) => void;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   if (!klass || !background) {
     return (
       <p className="text-sm" style={{ color: "var(--color-text-hint)" }}>
-        Selecciona clase y trasfondo antes de configurar el equipo.
+        {tr("wizard.equipment.needClassBg")}
       </p>
     );
   }
+
+  const bgUi = localizedBackgroundBasics(background, locale);
 
   function rollGold() {
     if (!klass) return;
@@ -1865,35 +1943,35 @@ function EquipmentStep({
           className={moneyMethod === "fixed" ? "btn-accent" : "btn-ghost"}
           onClick={() => setMoneyMethod("fixed")}
         >
-          Tomar equipo de clase
+          {tr("wizard.equipment.takeClass")}
         </button>
         <button
           className={moneyMethod === "rolled" ? "btn-accent" : "btn-ghost"}
           onClick={() => setMoneyMethod("rolled")}
         >
-          Tirar dinero inicial ({goldExpr} po)
+          {tr("wizard.equipment.rollGold", { expr: goldExpr })}
         </button>
       </div>
 
       <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
         {moneyMethod === "fixed"
-          ? `Llevas el paquete estándar de tu clase + los objetos del trasfondo ${background.label}.`
-          : `Rolas tu oro inicial y vas a comprar el equipo por tu cuenta. Sólo conservas el equipo del trasfondo ${background.label}.`}
+          ? tr("wizard.equipment.fixedBlurb", { label: bgUi.label })
+          : tr("wizard.equipment.rolledBlurb", { label: bgUi.label })}
       </p>
 
       {moneyMethod === "fixed" && (
         <div className="space-y-4">
           {klass.startingEquipmentFixed.length > 0 && (
             <div className="card">
-              <p className="label mb-2">Equipo inicial garantizado</p>
+              <p className="label mb-2">{tr("wizard.equipment.guaranteedTitle")}</p>
               <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
                 {klass.startingEquipmentFixed.map((it, i) => (
                   <li key={i}>
                     {it.qty > 1 ? `${it.qty}× ` : ""}
-                    {it.name}
+                    {localizeGamePhrase(it.name, locale)}
                     {it.note && (
                       <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        · {it.note}
+                        · {localizeGamePhrase(it.note, locale)}
                       </span>
                     )}
                   </li>
@@ -1903,7 +1981,7 @@ function EquipmentStep({
           )}
           {klass.startingEquipmentChoices.map((choice) => (
             <div key={choice.id} className="card">
-              <p className="label mb-2">{choice.label}</p>
+              <p className="label mb-2">{localizeGamePhrase(choice.label, locale)}</p>
               <div className="grid grid-cols-1 gap-2">
                 {choice.options.map((opt) => {
                   const picked = equipmentChoices[choice.id] === opt.id;
@@ -1914,11 +1992,15 @@ function EquipmentStep({
                       className={picked ? "card-accent text-left" : "card text-left"}
                       style={{ padding: "12px 14px" }}
                     >
-                      <p className="text-sm">{opt.label}</p>
+                      <p className="text-sm">{localizeGamePhrase(opt.label, locale)}</p>
                       <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
                         {opt.items
                           .slice(0, 6)
-                          .map((it) => (it.qty > 1 ? `${it.qty}× ${it.name}` : it.name))
+                          .map((it) =>
+                            it.qty > 1
+                              ? `${it.qty}× ${localizeGamePhrase(it.name, locale)}`
+                              : localizeGamePhrase(it.name, locale),
+                          )
                           .join(", ")}
                         {opt.items.length > 6 ? "…" : ""}
                       </p>
@@ -1934,19 +2016,21 @@ function EquipmentStep({
       {moneyMethod === "rolled" && (
         <>
           <div className="card">
-            <p className="label mb-2">Tirada de oro inicial ({goldExpr})</p>
+            <p className="label mb-2">{tr("wizard.equipment.goldRollTitle", { expr: goldExpr })}</p>
             <div className="flex flex-wrap items-center gap-3">
               <button className="btn-accent" onClick={rollGold}>
-                {rolledGold == null ? "Tirar dados" : "Volver a tirar"}
+                {rolledGold == null ? tr("wizard.equipment.rollDice") : tr("wizard.equipment.rollAgain")}
               </button>
               {rolledGold != null && (
                 <div>
                   <p className="text-sm">
-                    <strong>{rolledGold} po</strong>
+                    <strong>{localizeGamePhrase(`${rolledGold} po`, locale)}</strong>
                   </p>
                   <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    Tiradas: [{goldRolls.join(", ")}]
-                    {klass.startingGoldDice.multiplier > 1 ? ` × ${klass.startingGoldDice.multiplier}` : ""}
+                    {tr("wizard.equipment.goldRollsLine", {
+                      rolls: goldRolls.join(", "),
+                      mult: klass.startingGoldDice.multiplier > 1 ? ` × ${klass.startingGoldDice.multiplier}` : "",
+                    })}
                   </p>
                 </div>
               )}
@@ -1957,10 +2041,9 @@ function EquipmentStep({
             style={{ padding: "14px 16px", cursor: "pointer" }}
           >
             <div>
-              <p className="text-sm">Conservar objetos del trasfondo</p>
+              <p className="text-sm">{tr("wizard.equipment.keepBgGear")}</p>
               <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                Por RAW (PHB p. 143) al rolar oro inicial sólo llevas lo que compres. Esta regla de casa deja los objetos del trasfondo
-                {" "}{background.label}; desactívala para ajustarte al reglamento estricto.
+                {tr("wizard.equipment.keepBgHint", { label: bgUi.label })}
               </p>
             </div>
             <input
@@ -1973,18 +2056,20 @@ function EquipmentStep({
       )}
 
       <div className="card">
-        <p className="label mb-2">Equipo del trasfondo ({background.label})</p>
+        <p className="label mb-2">{tr("wizard.equipment.bgPackTitle", { label: bgUi.label })}</p>
         <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
           {background.equipment.map((name, i) => (
-            <li key={i}>{name}</li>
+            <li key={i}>{localizeGamePhrase(name, locale)}</li>
           ))}
           <li>
-            <span style={{ color: "var(--color-accent)" }}>{background.startingMoney.gp} po</span> iniciales del trasfondo
+            <span style={{ color: "var(--color-accent)" }}>
+              {tr("wizard.equipment.bgGoldLine", { n: background.startingMoney.gp })}
+            </span>
           </li>
         </ul>
         {moneyMethod === "rolled" && !keepBgEquipmentOnRoll && (
           <p className="mt-3 text-xs" style={{ color: "var(--color-accent)" }}>
-            Estos objetos no se añadirán a tu inventario porque desactivaste la regla de casa.
+            {tr("wizard.equipment.houseRuleWarn")}
           </p>
         )}
       </div>
@@ -2033,28 +2118,41 @@ function ReviewStep({
   tools: string[];
   spells: { name: string; level: number; prepared: boolean }[];
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const fightingStyleRecords = fightingStyles
     .map((fid) => FIGHTING_STYLES.find((st) => st.id === fid))
-    .filter((st): st is FightingStyle => st != null);
+    .filter((st): st is FightingStyle => st != null)
+    .map((st) => localizedFightingStyle(st, locale));
   const featRecords = feats
     .map((id) => FEATS.find((f) => f.id === id))
     .filter((f): f is Feat => f != null);
+  const raceDisp = race ? localizedRaceBasics(race, locale).label : "?";
+  const klassDisp = klass ? localizedClassBasics(klass, locale).label : "?";
+  const bgDisp = background ? localizedBackgroundBasics(background, locale).label : "?";
+
   return (
     <div className="space-y-4">
       <div className="card">
-        <h2 className="mb-1">{name || "Sin nombre"}</h2>
+        <h2 className="mb-1">{name || tr("wizard.review.unnamed")}</h2>
         {playerName && (
           <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-            Jugador: {playerName}
+            {tr("wizard.review.playerPrefix")} {playerName}
           </p>
         )}
         <p className="mt-2" style={{ color: "var(--color-text-secondary)" }}>
-          {race?.label ?? "?"} {klass?.label ?? "?"} nivel {level} · {alignment} · Trasfondo: {background?.label ?? "?"}
+          {tr("wizard.review.lineage", {
+            race: raceDisp,
+            klass: klassDisp,
+            level,
+            alignment: alignmentLabel(alignment, tr),
+            background: bgDisp,
+          })}
         </p>
         <div className="mt-5 grid grid-cols-3 gap-3">
-          <Stat label="HP máximo" value={maxHp} />
-          <Stat label="CA" value={ac} />
-          <Stat label="Competencia" value={`+${prof}`} />
+          <Stat label={tr("wizard.review.maxHp")} value={maxHp} />
+          <Stat label={tr("wizard.review.ac")} value={ac} />
+          <Stat label={tr("wizard.review.prof")} value={`+${prof}`} />
         </div>
         <div className="mt-5 grid grid-cols-6 gap-2">
           {ABILITIES.map((a) => (
@@ -2068,27 +2166,29 @@ function ReviewStep({
       </div>
 
       <div className="card">
-        <p className="label mb-2">Habilidades con competencia</p>
+        <p className="label mb-2">{tr("wizard.review.profSkills")}</p>
         <p className="text-sm">
-          {skills.length ? skills.map((k) => SKILLS[k]?.label ?? k).join(", ") : "Ninguna"}
+          {skills.length ? skills.map((k) => localizedSkillLabel(k, locale)).join(", ") : tr("wizard.review.none")}
         </p>
       </div>
 
       <div className="card">
-        <p className="label mb-2">Idiomas</p>
-        <p className="text-sm">{languages.length ? languages.join(", ") : "—"}</p>
+        <p className="label mb-2">{tr("wizard.review.languages")}</p>
+        <p className="text-sm">
+          {languages.length ? languages.map((l) => displayLanguageName(l, locale)).join(", ") : "—"}
+        </p>
       </div>
 
       {tools.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Herramientas y otros</p>
-          <p className="text-sm">{tools.join(", ")}</p>
+          <p className="label mb-2">{tr("wizard.review.tools")}</p>
+          <p className="text-sm">{tools.map((t) => localizeGamePhrase(t, locale)).join(", ")}</p>
         </div>
       )}
 
       {fightingStyleRecords.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Estilo de combate</p>
+          <p className="label mb-2">{tr("wizard.review.fightingStyles")}</p>
           <ul className="space-y-3 text-sm">
             {fightingStyleRecords.map((s) => (
               <li key={s.id}>
@@ -2106,7 +2206,7 @@ function ReviewStep({
 
       {featRecords.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Dotes</p>
+          <p className="label mb-2">{tr("wizard.review.feats")}</p>
           <ul className="space-y-3 text-sm">
             {featRecords.map((f) => (
               <li key={f.id}>
@@ -2122,15 +2222,20 @@ function ReviewStep({
 
       {spells.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Conjuros iniciales</p>
+          <p className="label mb-2">{tr("wizard.review.spellsTitle")}</p>
           <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
             {spells.map((s, i) => (
               <li key={i}>
-                <span style={{ color: "var(--color-accent)" }}>{s.level === 0 ? "Truco" : `Nv ${s.level}`}</span> ·{" "}
-                {s.name}
+                <span style={{ color: "var(--color-accent)" }}>
+                  {s.level === 0 ? tr("wizard.spells.cantripBadge") : tr("wizard.spells.levelBadge", { n: s.level })}
+                </span>{" "}
+                · {s.name}
                 {!s.prepared && s.level > 0 && (
                   <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    · {klass?.spellcasting?.preparation === "spellbook" ? "en grimorio" : "repertorio (no preparado)"}
+                    ·{" "}
+                    {klass?.spellcasting?.preparation === "spellbook"
+                      ? tr("wizard.review.spellbookNote")
+                      : tr("wizard.review.unpreparedNote")}
                   </span>
                 )}
               </li>
@@ -2140,18 +2245,20 @@ function ReviewStep({
       )}
 
       <div className="card">
-        <p className="label mb-2">Equipo</p>
+        <p className="label mb-2">{tr("wizard.review.equipmentTitle")}</p>
         {equipment.length === 0 ? (
-          <p className="text-sm" style={{ color: "var(--color-text-hint)" }}>Sin objetos.</p>
+          <p className="text-sm" style={{ color: "var(--color-text-hint)" }}>
+            {tr("wizard.review.noEquipment")}
+          </p>
         ) : (
           <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
             {equipment.map((it, i) => (
               <li key={i}>
                 {it.qty > 1 ? `${it.qty}× ` : ""}
-                {it.name}
+                {localizeGamePhrase(it.name, locale)}
                 {it.note && (
                   <span className="ml-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    · {it.note}
+                    · {localizeGamePhrase(it.note, locale)}
                   </span>
                 )}
               </li>
@@ -2159,7 +2266,7 @@ function ReviewStep({
           </ul>
         )}
         <p className="mt-3 text-sm">
-          <strong>Oro inicial:</strong> {money.gp} po
+          <strong>{tr("wizard.review.startingGold")}</strong> {localizeGamePhrase(`${money.gp} po`, locale)}
         </p>
       </div>
     </div>
@@ -2214,33 +2321,50 @@ function SpellsStep({
   chosenRacialCantrip: string[];
   setChosenRacialCantrip: (s: string[]) => void;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const classId = (klass?.id ?? "") as SpellClassId;
   const maxSpellLv = klass?.spellcasting ? maxCastableSpellLevel(klass.spellcasting.caster, characterLevel) : 1;
+
+  function localizedSpellClassName(classIdStr: string): string {
+    const raw = CLASSES.find((c) => c.id === classIdStr);
+    return raw ? localizedClassBasics(raw, locale).label : classIdStr;
+  }
+
   const classCantrips = useMemo<Spell[]>(
-    () => (classId ? spellsForClassAtLevel(classId, 0) : []),
-    [classId],
+    () => (classId ? spellsForClassAtLevel(classId, 0).map((s) => spellForLocale(s, locale)) : []),
+    [classId, locale],
   );
   const spellbookPreview = useMemo(() => {
     return chosenSpells
       .map((id) => SPELLS.find((s) => s.id === id))
       .filter((s): s is Spell => s != null)
-      .sort((a, b) => (a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, "es")));
-  }, [chosenSpells]);
+      .map((s) => spellForLocale(s, locale))
+      .sort((a, b) =>
+        a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, spellSortLocale(locale)),
+      );
+  }, [chosenSpells, locale]);
   const racialPool = useMemo<Spell[]>(() => {
     if (!racialCantripChoice) return [];
-    return spellsForClassAtLevel(racialCantripChoice.fromClass as SpellClassId, 0);
-  }, [racialCantripChoice]);
+    return spellsForClassAtLevel(racialCantripChoice.fromClass as SpellClassId, 0).map((s) => spellForLocale(s, locale));
+  }, [racialCantripChoice, locale]);
 
   const grantedRacial: { spell: Spell; ability: Ability; source: string }[] = useMemo(() => {
     const grants = [...(race?.grantedCantrips ?? []), ...(variant?.grantedCantrips ?? [])];
+    const srcLabel =
+      variant && race
+        ? localizedRaceVariant(variant, race.id, locale).label ?? localizedRaceBasics(race, locale).label
+        : race
+          ? localizedRaceBasics(race, locale).label
+          : "";
     return grants
       .map((g) => {
         const spell = SPELLS.find((s) => s.id === g.spellId);
         if (!spell) return null;
-        return { spell, ability: g.ability, source: variant?.label ?? race?.label ?? "raza" };
+        return { spell: spellForLocale(spell, locale), ability: g.ability, source: srcLabel };
       })
       .filter((x): x is { spell: Spell; ability: Ability; source: string } => x != null);
-  }, [race, variant]);
+  }, [race, variant, locale]);
 
   const toggleFrom = (list: string[], setList: (v: string[]) => void, max: number, id: string) => {
     const set = new Set(list);
@@ -2260,28 +2384,34 @@ function SpellsStep({
 
   const preparation = klass?.spellcasting?.preparation;
   const spellsAbility = klass?.spellcasting?.ability;
+  const klassUi = klass ? localizedClassBasics(klass, locale) : null;
   const spellsLabel =
     preparation === "spellbook"
-      ? `Grimorio: elige ${spellsExpected} conjuros para tu libro (nivel máximo ${maxSpellLv}; puedes mezclar niveles)`
+      ? tr("wizard.spells.labelSpellbook", { n: spellsExpected, maxLv: maxSpellLv })
       : preparation === "prepared" && spellsAbility
-        ? `Lista de clase (hasta nv. ${maxSpellLv}): marca ${spellsExpected} conjuros preparados para empezar; el resto queda en tu repertorio sin preparar (PHB: tras un descanso largo puedes cambiar en la ficha).`
-        : `Conjuros conocidos (hasta nivel ${maxSpellLv}): elige ${spellsExpected}`;
+        ? tr("wizard.spells.labelPrepared", { maxLv: maxSpellLv, n: spellsExpected })
+        : tr("wizard.spells.labelKnown", { maxLv: maxSpellLv, n: spellsExpected });
 
   const introText = klass?.spellcasting
-    ? `Selecciona los trucos y conjuros de tu ${klass.label.toLowerCase()} al nivel ${characterLevel} (PHB).`
-    : "Tu raza te otorga conjuros raciales que completar.";
+    ? tr("wizard.spells.introKnown", {
+        classLower: klassUi?.label.toLowerCase() ?? "",
+        level: characterLevel,
+      })
+    : tr("wizard.spells.introRacial");
   const cantripsHeader = klass?.spellcasting
-    ? `Trucos de ${klass.label.toLowerCase()}: elige ${cantripsExpected}`
-    : `Trucos: elige ${cantripsExpected}`;
+    ? tr("wizard.spells.cantripsOfClass", {
+        classLower: klassUi?.label.toLowerCase() ?? "",
+        n: cantripsExpected,
+      })
+    : tr("wizard.spells.cantripsGeneric", { n: cantripsExpected });
 
   return (
     <div className="space-y-6">
       <div className="card">
         <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
           {introText}
-          {preparation === "prepared" &&
-            " Tras un descanso largo puedes cambiar qué conjuros de nv. ≥1 llevas preparados (PHB); en la hoja de personaje hay un panel para ello."}
-          {preparation === "spellbook" && " Podrás preparar hasta nivel + mod INT de entre ellos cada día."}
+          {preparation === "prepared" && tr("wizard.spells.preparedLongRest")}
+          {preparation === "spellbook" && tr("wizard.spells.spellbookPrepHint")}
         </p>
       </div>
 
@@ -2298,6 +2428,7 @@ function SpellsStep({
             selected={chosenCantrips}
             onToggle={(id) => toggleFrom(chosenCantrips, setChosenCantrips, cantripsExpected, id)}
             max={cantripsExpected}
+            locale={locale}
           />
         </div>
       )}
@@ -2311,21 +2442,22 @@ function SpellsStep({
             </span>
           </div>
           <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            No puedes elegir conjuros de un nivel superior al de tus ranuras ({maxSpellLv}).
+            {tr("wizard.spells.maxSlotHint", { maxLv: maxSpellLv })}
           </p>
           {Array.from({ length: maxSpellLv }, (_, i) => i + 1).map((lv) => {
-            const row = classId ? spellsForClassAtLevel(classId, lv) : [];
+            const row = classId ? spellsForClassAtLevel(classId, lv).map((s) => spellForLocale(s, locale)) : [];
             if (row.length === 0) return null;
             return (
               <div key={lv} className="mb-5">
                 <p className="mb-2 text-xs uppercase" style={{ color: "var(--color-text-hint)", letterSpacing: "0.06em" }}>
-                  Nivel {lv}
+                  {tr("wizard.spells.levelHeader", { n: lv })}
                 </p>
                 <SpellGrid
                   spells={row}
                   selected={chosenSpells}
                   onToggle={toggleLeveledSpell}
                   max={spellsExpected}
+                  locale={locale}
                 />
               </div>
             );
@@ -2337,20 +2469,24 @@ function SpellsStep({
         <div>
           <div className="mb-3 flex items-center justify-between">
             <p className="label">
-              Preparados hoy (nivel + mod {spellsAbility ? ABILITY_LABEL[spellsAbility] : "INT"}): elige {preparedExpected} de tu grimorio
+              {tr("wizard.spells.preparedToday", {
+                ability: spellsAbility ? localizedAbilityLabel(spellsAbility, locale) : "INT",
+                n: preparedExpected,
+              })}
             </p>
             <span className="badge" style={{ color: chosenPrepared.length === preparedExpected ? "var(--color-accent)" : undefined }}>
               {chosenPrepared.length}/{preparedExpected}
             </span>
           </div>
           <p className="mb-3 text-xs" style={{ color: "var(--color-text-hint)" }}>
-            El resto permanecen en tu libro sin preparar (PHB p. 114). Podrás cambiarlos tras un descanso largo.
+            {tr("wizard.spells.spellbookRestHint")}
           </p>
           <SpellGrid
             spells={spellbookPreview}
             selected={chosenPrepared}
             onToggle={(id) => toggleFrom(chosenPrepared, setChosenPrepared, preparedExpected, id)}
             max={preparedExpected}
+            locale={locale}
           />
         </div>
       )}
@@ -2359,8 +2495,17 @@ function SpellsStep({
         <div>
           <div className="mb-3 flex items-center justify-between">
             <p className="label">
-              Truco racial de {variant?.label ?? race?.label}: elige {racialCantripChoice.count} de la lista de{" "}
-              {racialCantripChoice.fromClass} (se lanza con {ABILITY_LABEL[racialCantripChoice.ability]})
+              {tr("wizard.spells.racialCantrip", {
+                source:
+                  variant && race
+                    ? localizedRaceVariant(variant, race.id, locale).label ?? localizedRaceBasics(race, locale).label
+                    : race
+                      ? localizedRaceBasics(race, locale).label
+                      : "",
+                count: racialCantripChoice.count,
+                fromClass: localizedSpellClassName(racialCantripChoice.fromClass),
+                ability: localizedAbilityLabel(racialCantripChoice.ability, locale),
+              })}
             </p>
             <span className="badge" style={{ color: chosenRacialCantrip.length === racialCantripChoice.count ? "var(--color-accent)" : undefined }}>
               {chosenRacialCantrip.length}/{racialCantripChoice.count}
@@ -2371,19 +2516,20 @@ function SpellsStep({
             selected={chosenRacialCantrip}
             onToggle={(id) => toggleFrom(chosenRacialCantrip, setChosenRacialCantrip, racialCantripChoice.count, id)}
             max={racialCantripChoice.count}
+            locale={locale}
           />
         </div>
       )}
 
       {grantedRacial.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Trucos otorgados por tu raza/subraza</p>
+          <p className="label mb-2">{tr("wizard.spells.grantedCantripsTitle")}</p>
           <ul className="space-y-1 text-sm">
             {grantedRacial.map((g) => (
               <li key={g.spell.id}>
                 <strong>{g.spell.name}</strong>{" "}
                 <span style={{ color: "var(--color-text-hint)" }}>
-                  · {g.source} · {ABILITY_LABEL[g.ability]} · {g.spell.description}
+                  · {g.source} · {localizedAbilityLabel(g.ability, locale)} · {g.spell.description}
                 </span>
               </li>
             ))}
@@ -2399,16 +2545,19 @@ function SpellGrid({
   selected,
   onToggle,
   max,
+  locale,
 }: {
   spells: Spell[];
   selected: string[];
   onToggle: (id: string) => void;
   max: number;
+  locale: ReturnType<typeof useLocale>;
 }) {
+  const tr = useTranslations();
   if (spells.length === 0) {
     return (
       <p className="text-sm" style={{ color: "var(--color-text-hint)" }}>
-        No hay conjuros disponibles para esta selección.
+        {tr("wizard.spells.noneAvailable")}
       </p>
     );
   }
@@ -2419,9 +2568,9 @@ function SpellGrid({
         const checked = selected.includes(s.id);
         const disabled = !checked && full;
         const tags = [
-          s.school.charAt(0).toUpperCase() + s.school.slice(1),
-          s.ritual ? "Ritual" : null,
-          s.concentration ? "Concentración" : null,
+          localizedSpellSchool(s.school, locale),
+          s.ritual ? tr("wizard.spells.tagRitual") : null,
+          s.concentration ? tr("wizard.spells.tagConc") : null,
         ].filter(Boolean);
         return (
           <label
@@ -2473,6 +2622,7 @@ function FeatsStep({
   asiLevels: number[];
   asiSlotPreTotals: Record<Ability, number>[];
 }) {
+  const tr = useTranslations();
   const toggle = (id: string) => {
     const next = new Set(chosen);
     if (next.has(id)) next.delete(id);
@@ -2503,8 +2653,7 @@ function FeatsStep({
           <div className="card">
             <div className="flex items-center justify-between">
               <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                Tu raza te concede {slots} dote{slots === 1 ? "" : "s"} inicial{slots === 1 ? "" : "es"} (PHB cap. 6).
-                Cada dote con ASI parcial (+1 a un atributo a elección) requiere que elijas el atributo beneficiado.
+                {tr("wizard.feats.racialIntro", { slots })}
               </p>
               <span className="badge" style={{ color: full ? "var(--color-accent)" : undefined }}>
                 {chosen.length}/{slots}
@@ -2512,7 +2661,7 @@ function FeatsStep({
             </div>
           </div>
           <FeatList
-            title="Dote racial"
+            title={tr("wizard.feats.racialTitle")}
             selectedIds={chosen}
             disabledIds={reservedFeatIds}
             onToggle={toggle}
@@ -2527,9 +2676,7 @@ function FeatsStep({
         <section className="space-y-4">
           <div className="card">
             <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-              Tu clase te concede {asiSlots} mejora{asiSlots === 1 ? "" : "s"} de atributo o dote (niveles{" "}
-              {asiLevels.join(", ")}) — PHB tablas de clase cap. 3. Para cada mejora elige entre subir atributos o
-              canjearla por una dote.
+              {tr("wizard.feats.asiIntro", { slots: asiSlots, levels: asiLevels.join(", ") })}
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4">
@@ -2575,6 +2722,8 @@ function FeatList({
   abilityChoices: Record<string, Ability>;
   pickAbility: (featId: string, ab: Ability) => void;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   return (
     <div>
       <p className="label mb-3">{title}</p>
@@ -2600,12 +2749,12 @@ function FeatList({
                     <strong>{feat.name}</strong>
                     {feat.prerequisite && (
                       <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        Req: {feat.prerequisite}
+                        {tr("wizard.feats.req")} {feat.prerequisite}
                       </span>
                     )}
                     {reservedElsewhere && (
                       <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                        · ya asignada en otra mejora
+                        · {tr("wizard.feats.reservedOther")}
                       </span>
                     )}
                   </p>
@@ -2624,7 +2773,7 @@ function FeatList({
               )}
               {picked && needsAbilityChoice && feat.abilityBonus && (
                 <div className="mt-3">
-                  <p className="label mb-2">Elige el atributo a +{feat.abilityBonus.value}</p>
+                  <p className="label mb-2">{tr("wizard.feats.pickAbility", { n: feat.abilityBonus.value })}</p>
                   <div className="flex flex-wrap gap-2">
                     {feat.abilityBonus.from.map((ab) => (
                       <button
@@ -2633,7 +2782,7 @@ function FeatList({
                         className={chosenAbility === ab ? "btn-accent" : "btn-ghost"}
                         style={{ padding: "4px 10px", fontSize: 12 }}
                       >
-                        {ABILITY_LABEL[ab]}
+                        {localizedAbilityLabel(ab, locale)}
                       </button>
                     ))}
                   </div>
@@ -2664,6 +2813,8 @@ function AsiSlot({
   reservedOtherSlots: Set<string>;
   preTotals: Record<Ability, number>;
 }) {
+  const tr = useTranslations();
+  const locale = useLocale();
   const ABILITY_CAP = 20;
   // Dado un estado de `picks` propuesto, convierte a contribución por atributo siguiendo
   // la misma regla que `racialBonus` (1 pick → +2; 2 picks distintos → +1 cada uno).
@@ -2757,22 +2908,25 @@ function AsiSlot({
   const asiSummary =
     value.kind === "asi"
       ? value.picks.length === 0
-        ? "Elige uno o dos atributos"
+        ? tr("wizard.asi.summaryEmpty")
         : value.picks.length === 1
-        ? `+1 a ${ABILITY_LABEL[value.picks[0]]} (puedes duplicar para +2)`
+        ? tr("wizard.asi.summaryPlusOneDup", { a: localizedAbilityLabel(value.picks[0], locale) })
         : value.picks[0] === value.picks[1]
-        ? `+2 a ${ABILITY_LABEL[value.picks[0]]}`
-        : `+1 a ${ABILITY_LABEL[value.picks[0]]} y +1 a ${ABILITY_LABEL[value.picks[1]]}`
+        ? tr("wizard.asi.summaryPlusTwo", { a: localizedAbilityLabel(value.picks[0], locale) })
+        : tr("wizard.asi.summarySplit", {
+            a: localizedAbilityLabel(value.picks[0], locale),
+            b: localizedAbilityLabel(value.picks[1], locale),
+          })
       : "";
 
   return (
     <div className="card" style={{ padding: "16px 18px" }}>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm">
-          <strong>Mejora {idx + 1}</strong>
+          <strong>{tr("wizard.asi.slotTitle", { n: idx + 1 })}</strong>
           {typeof level === "number" && (
             <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-              · nivel {level}
+              · {tr("wizard.asi.levelTag", { n: level })}
             </span>
           )}
         </p>
@@ -2782,32 +2936,33 @@ function AsiSlot({
             className={value.kind === "asi" ? "btn-accent" : "btn-ghost"}
             style={{ padding: "4px 10px", fontSize: 12 }}
           >
-            Subir atributos
+            {tr("wizard.asi.raiseAbilities")}
           </button>
           <button
             onClick={() => setKind("feat")}
             className={value.kind === "feat" ? "btn-accent" : "btn-ghost"}
             style={{ padding: "4px 10px", fontSize: 12 }}
           >
-            Dote
+            {tr("wizard.asi.feat")}
           </button>
         </div>
       </div>
 
       {value.kind === "none" && (
         <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-          Elige una opción: subir atributos (+2 a uno o +1 a dos) o canjear por una dote.
+          {tr("wizard.asi.chooseKind")}
         </p>
       )}
 
       {value.kind === "asi" && (
         <div>
-          <p className="label mb-2">Elige +2 a uno o +1 a dos atributos</p>
+          <p className="label mb-2">{tr("wizard.asi.pickOneOrTwo")}</p>
           <div className="flex flex-wrap gap-2">
             {ABILITIES.map((ab) => {
               const count = value.picks.filter((p) => p === ab).length;
               const blocked = abilityButtonBlocked(ab);
               const atCap = (preTotals?.[ab] ?? 0) >= ABILITY_CAP;
+              const lab = localizedAbilityLabel(ab, locale);
               return (
                 <button
                   key={ab}
@@ -2818,12 +2973,12 @@ function AsiSlot({
                   title={
                     blocked
                       ? atCap
-                        ? `${ABILITY_LABEL[ab]} ya está en 20 (tope RAW, PHB p. 12)`
-                        : `Subir ${ABILITY_LABEL[ab]} superaría el tope de 20 (PHB p. 12)`
+                        ? tr("wizard.asi.capAt20", { label: lab })
+                        : tr("wizard.asi.wouldExceed", { label: lab })
                       : undefined
                   }
                 >
-                  {ABILITY_LABEL[ab]}
+                  {lab}
                   {count > 0 && <span className="ml-1">+{count}</span>}
                 </button>
               );
@@ -2838,10 +2993,10 @@ function AsiSlot({
               title={
                 canUpgradeSingleToDouble
                   ? undefined
-                  : `Subir ${ABILITY_LABEL[value.picks[0]]} otro +1 superaría el tope de 20`
+                  : tr("wizard.asi.wouldExceedDup", { label: localizedAbilityLabel(value.picks[0], locale) })
               }
             >
-              Concentrar en +2 a {ABILITY_LABEL[value.picks[0]]}
+              {tr("wizard.asi.duplicateForTwo", { label: localizedAbilityLabel(value.picks[0], locale) })}
             </button>
           )}
           <p className="mt-3 text-xs" style={{ color: "var(--color-text-secondary)" }}>
@@ -2852,7 +3007,7 @@ function AsiSlot({
 
       {value.kind === "feat" && (
         <div>
-          <p className="label mb-2">Elige una dote</p>
+          <p className="label mb-2">{tr("wizard.asi.pickFeat")}</p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {FEATS.map((feat) => {
               const reservedAsRacial = reservedRacial.has(feat.id);
@@ -2872,7 +3027,7 @@ function AsiSlot({
                     style={{ cursor: disabled ? "not-allowed" : "pointer" }}
                     title={
                       capBlocked
-                        ? `Su bono de +${feat.abilityBonus?.value} superaría el tope de 20 (PHB p. 12)`
+                        ? tr("wizard.asi.featBonusBlocked", { n: feat.abilityBonus?.value ?? 0 })
                         : undefined
                     }
                   >
@@ -2881,17 +3036,17 @@ function AsiSlot({
                         <strong>{feat.name}</strong>
                         {feat.prerequisite && (
                           <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                            Req: {feat.prerequisite}
+                            {tr("wizard.feats.req")} {feat.prerequisite}
                           </span>
                         )}
                         {(reservedAsRacial || reservedElsewhere) && (
                           <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                            · ya asignada
+                            · {tr("wizard.asi.reserved")}
                           </span>
                         )}
                         {capBlocked && (
                           <span className="ml-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
-                            · atributo al tope de 20
+                            · {tr("wizard.asi.atCapTag")}
                           </span>
                         )}
                       </p>
@@ -2916,11 +3071,12 @@ function AsiSlot({
                   )}
                   {picked && needsAbilityChoice && feat.abilityBonus && (
                     <div className="mt-3">
-                      <p className="label mb-2">Elige el atributo a +{feat.abilityBonus.value}</p>
+                      <p className="label mb-2">{tr("wizard.feats.pickAbility", { n: feat.abilityBonus.value })}</p>
                       <div className="flex flex-wrap gap-2">
                         {feat.abilityBonus.from.map((ab) => {
                           const overCap =
                             (preTotals?.[ab] ?? 0) + feat.abilityBonus!.value > ABILITY_CAP;
+                          const lab = localizedAbilityLabel(ab, locale);
                           return (
                             <button
                               key={ab}
@@ -2930,11 +3086,11 @@ function AsiSlot({
                               style={{ padding: "4px 10px", fontSize: 12, opacity: overCap ? 0.5 : 1 }}
                               title={
                                 overCap
-                                  ? `Subir ${ABILITY_LABEL[ab]} superaría el tope de 20 (PHB p. 12)`
+                                  ? tr("wizard.asi.wouldExceed", { label: lab })
                                   : undefined
                               }
                             >
-                              {ABILITY_LABEL[ab]}
+                              {lab}
                             </button>
                           );
                         })}
@@ -2964,6 +3120,7 @@ function buildKnownSpells(params: {
     characterLevel: number;
     caster: NonNullable<ClassBasics["spellcasting"]>["caster"];
   };
+  locale: AppLocale;
 }): { name: string; level: number; prepared: boolean }[] {
   const {
     chosenCantrips,
@@ -2973,6 +3130,7 @@ function buildKnownSpells(params: {
     grantedRacialCantrips,
     preparation,
     preparedCaster,
+    locale,
   } = params;
   const out: { name: string; level: number; prepared: boolean }[] = [];
   const seen = new Set<string>();
@@ -2981,7 +3139,8 @@ function buildKnownSpells(params: {
     const spell = SPELLS.find((s) => s.id === spellId);
     if (!spell) return;
     seen.add(spellId);
-    out.push({ name: spell.name, level: spell.level, prepared });
+    const loc = spellForLocale(spell, locale);
+    out.push({ name: loc.name, level: loc.level, prepared });
   };
   for (const id of chosenCantrips) push(id, true);
   for (const id of chosenRacialCantrip) push(id, true);
@@ -2993,8 +3152,12 @@ function buildKnownSpells(params: {
   } else if (preparation === "prepared" && preparedCaster) {
     const maxLv = maxCastableSpellLevel(preparedCaster.caster, preparedCaster.characterLevel);
     if (maxLv >= 1) {
-      const full = spellsForClassUpToLevel(preparedCaster.classId, maxLv).filter((s) => s.level >= 1);
-      full.sort((a, b) => (a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, "es")));
+      const full = spellsForClassUpToLevel(preparedCaster.classId, maxLv)
+        .filter((s) => s.level >= 1)
+        .map((s) => spellForLocale(s, locale))
+        .sort((a, b) =>
+          a.level !== b.level ? a.level - b.level : a.name.localeCompare(b.name, spellSortLocale(locale)),
+        );
       const preparedSet = new Set(chosenSpells);
       for (const s of full) push(s.id, preparedSet.has(s.id));
     } else {
