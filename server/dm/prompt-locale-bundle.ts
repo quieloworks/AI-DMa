@@ -86,7 +86,8 @@ const ES: DmLocaleBlocks = {
 - Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
 - Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
 - NARRATIVA vs TÉCNICO: en <narrativa> no actúes como visor de tablero: cero enumeración de celdas/casillas/coordenadas/medidas exactas salvo petición explícita del grupo. El JSON + MAPEO TÁCTICO bastan para coherencia; la voz al grupo es historia, no desglose geométrico.
-- Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`,
+- Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.
+- Tras combat_end:true (victoria o fin del encuentro): incluye siempre xp_awards (PHB: XP de criaturas derrotadas entre PJs presentes, o XP del módulo/DMG). La app recalcula el nivel desde el XP total y avisa al grupo; en <narrativa> resume el XP otorgado y celebra en voz alta cualquier subida de nivel.`,
   combatDirectives: `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
 
 RELOJ Y combat_tracker (obligatorio en cada <acciones> con combat:true):
@@ -235,7 +236,8 @@ const EN: DmLocaleBlocks = {
 - Until initiative[] is complete for everyone on battle_map, do not resolve attacks or damage except PHB surprise/ambush rules.
 - Obstacles with tactical and narrative sense: use descriptive, consistent obstacles[].kind (e.g. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) so you can later narrate blocking walls, cover, sight lines, difficult terrain, etc.
 - NARRATIVE vs TECH: in <narrativa> do not act as a battlemap HUD: no enumerating cells/coordinates/exact feet unless the group asks. JSON + TACTICAL MAP suffice; the voice to the table is story, not geometry dump.
-- When the fight ends: combat:false, combat_end:true, battle_map omitted or empty.`,
+- When the fight ends: combat:false, combat_end:true, battle_map omitted or empty.
+- After combat_end:true (victory or encounter wrap): always include xp_awards (PHB: divide defeated creatures’ XP among PCs present, or use module/DMG awards). The app recalculates level from total XP and notifies the table; in <narrativa> recap XP granted and celebrate level-ups aloud.`,
   combatDirectives: `ACTIVE 5E COMBAT — rules as written (PHB/DMG where applicable):
 
 CLOCK & combat_tracker (required on every <acciones> with combat:true):

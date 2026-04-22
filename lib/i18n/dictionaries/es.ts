@@ -225,6 +225,8 @@ export const dictionaryEs: Record<string, string> = {
     "🎯 El DM pide a {{who}} tirar {{expression}}{{labelParen}}{{dcPart}}.",
   "storyRoom.dice.dcShort": "CD",
   "storyRoom.system.continue": "— el DM retoma el hilo —",
+  "dm.levelUp.system":
+    "📈 **{{name}}** sube del nivel {{from}} al **{{to}}** (XP total: {{xp}}). La ficha se ha actualizado; revisa PG máximos, maestría, ranuras y rasgos de clase (PHB).",
   "storyRoom.stream.noBody": "sin stream",
   "storyRoom.stream.dmError": "Error: {{message}}",
   "storyRoom.image.genFailed": "falló la generación",

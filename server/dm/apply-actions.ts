@@ -1,5 +1,17 @@
 import { getDb } from "@/lib/db";
+import { levelFromTotalXp } from "@/lib/xp-phb";
 import { getIo } from "../io-bus";
+
+export type LevelUpNotice = {
+  playerId: string;
+  characterId: string;
+  characterName: string;
+  oldLevel: number;
+  newLevel: number;
+  totalXp: number;
+};
+
+export type ApplyDmActionsResult = { levelUps: LevelUpNotice[] };
 
 type HpChange = { player_id?: string; delta?: number; reason?: string };
 type ItemChange = { player_id?: string; name?: string; qty?: number };
@@ -14,6 +26,7 @@ type CharData = {
   equipment?: Array<{ name: string; qty: number }>;
   statusEffects?: string[];
   xp?: number;
+  /** Sincronizado con XP total según umbrales PHB cuando hay xp_awards. */
   level?: number;
   spells?: { slots?: Record<string, { max: number; used: number }> };
 };
@@ -42,7 +55,7 @@ function emitCharacterUpdate(
   io.to(`session:${sessionId}`).emit("character:update", { sessionId, playerId, characterId, patch });
 }
 
-export function applyDmActions(sessionId: string, actions: Actions): void {
+export function applyDmActions(sessionId: string, actions: Actions): ApplyDmActionsResult {
   const db = getDb();
   const players = db
     .prepare<string, PlayerRow>("SELECT player_id, character_id FROM session_player WHERE session_id = ?")
@@ -132,13 +145,38 @@ export function applyDmActions(sessionId: string, actions: Actions): void {
     }
   }
 
+  const xpDeltaByCharacter = new Map<string, { playerId: string; delta: number }>();
   for (const x of xpAwards) {
-    if (typeof x.amount !== "number") continue;
+    if (typeof x.amount !== "number" || !Number.isFinite(x.amount)) continue;
     for (const t of resolveTargets(players, x.player_id)) {
-      const rec = queue(t.player_id, t.character_id);
-      if (!rec) continue;
-      rec.data.xp = (rec.data.xp ?? 0) + x.amount;
-      rec.patch.xp = rec.data.xp;
+      const cur = xpDeltaByCharacter.get(t.character_id);
+      if (cur) cur.delta += x.amount;
+      else xpDeltaByCharacter.set(t.character_id, { playerId: t.player_id, delta: x.amount });
+    }
+  }
+
+  const levelUps: LevelUpNotice[] = [];
+
+  for (const [characterId, { playerId, delta }] of xpDeltaByCharacter) {
+    const rec = queue(playerId, characterId);
+    if (!rec) continue;
+    const xpBefore = rec.data.xp ?? 0;
+    const levelBefore = levelFromTotalXp(xpBefore);
+    rec.data.xp = xpBefore + delta;
+    const levelAfter = levelFromTotalXp(rec.data.xp);
+    rec.data.level = levelAfter;
+    rec.patch.xp = rec.data.xp;
+    rec.patch.level = levelAfter;
+    if (levelAfter > levelBefore) {
+      const nameRow = db.prepare<string, { name: string }>("SELECT name FROM character WHERE id = ?").get(characterId);
+      levelUps.push({
+        playerId,
+        characterId,
+        characterName: nameRow?.name ?? "",
+        oldLevel: levelBefore,
+        newLevel: levelAfter,
+        totalXp: rec.data.xp,
+      });
     }
   }
 
@@ -161,11 +199,21 @@ export function applyDmActions(sessionId: string, actions: Actions): void {
   const now = Date.now();
   for (const rec of touched.values()) {
     if (Object.keys(rec.patch).length === 0) continue;
-    db.prepare("UPDATE character SET data_json = ?, updated_at = ? WHERE id = ?").run(
-      JSON.stringify(rec.data),
-      now,
-      rec.characterId
-    );
+    const lv = typeof rec.data.level === "number" ? rec.data.level : null;
+    if (lv != null && Number.isFinite(lv)) {
+      db.prepare("UPDATE character SET data_json = ?, updated_at = ?, level = ? WHERE id = ?").run(
+        JSON.stringify(rec.data),
+        now,
+        Math.max(1, Math.min(20, Math.floor(lv))),
+        rec.characterId
+      );
+    } else {
+      db.prepare("UPDATE character SET data_json = ?, updated_at = ? WHERE id = ?").run(
+        JSON.stringify(rec.data),
+        now,
+        rec.characterId
+      );
+    }
     emitCharacterUpdate(sessionId, rec.playerId, rec.characterId, rec.patch);
   }
 
@@ -216,4 +264,6 @@ export function applyDmActions(sessionId: string, actions: Actions): void {
       }
     }
   }
+
+  return { levelUps };
 }

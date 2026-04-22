@@ -140,12 +140,15 @@ export async function POST(req: NextRequest) {
     };
     const liveStatuses = (data.statusEffects as string[] | undefined) ?? [];
     const snapStatuses = (state.players?.find((p2) => p2.id === p.player_id)?.statusEffects ?? []) as string[];
+    const xpRaw = data.xp;
+    const xpNum = typeof xpRaw === "number" && Number.isFinite(xpRaw) ? Math.floor(xpRaw) : undefined;
     return {
       id: p.player_id,
       name: ch?.name ?? t(locale, "defaults.adventurer"),
       class: ch?.class ?? "",
       race: ch?.race ?? "",
       level: ch?.level ?? 1,
+      ...(xpNum !== undefined ? { xp: xpNum } : {}),
       hp: { current: hp.current ?? 10, max: hp.max ?? 10, temp: hp.temp ?? 0 },
       ac: (data.ac as number) ?? 10,
       notableItems: [],
@@ -399,9 +402,10 @@ export async function POST(req: NextRequest) {
             body.sessionId
           );
 
+          let levelUpsFromActions: { characterName: string; oldLevel: number; newLevel: number; totalXp: number }[] = [];
           if (body.mode === "auto") {
             try {
-              applyDmActions(body.sessionId, actObj);
+              levelUpsFromActions = applyDmActions(body.sessionId, actObj).levelUps;
             } catch (err) {
               console.warn("applyDmActions:", (err as Error).message);
             }
@@ -429,6 +433,25 @@ export async function POST(req: NextRequest) {
                   text: cleanNarrative,
                   originClientId: body.clientId,
                   id: `dm:${Date.now().toString(36)}`,
+                });
+              }
+              for (const up of levelUpsFromActions) {
+                const sysText = t(locale, "dm.levelUp.system", {
+                  name: up.characterName.trim() || t(locale, "defaults.adventurer"),
+                  from: up.oldLevel,
+                  to: up.newLevel,
+                  xp: up.totalXp,
+                });
+                const sysId = `sys:xp:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+                db.prepare(
+                  `INSERT INTO session_message(session_id, role, player_id, kind, content, created_at) VALUES(?, 'system', NULL, 'public', ?, ?)`
+                ).run(body.sessionId, sysText, Date.now());
+                io.to(`session:${body.sessionId}`).emit("chat:message", {
+                  sessionId: body.sessionId,
+                  role: "system",
+                  kind: "public",
+                  text: sysText,
+                  id: sysId,
                 });
               }
               io.to(`session:${body.sessionId}`).emit("scene:update", {

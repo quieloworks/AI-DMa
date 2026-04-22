@@ -83,6 +83,8 @@ export type SessionSnapshot = {
     class: string;
     race: string;
     level: number;
+    /** XP total acumulado en ficha (PHB); la app recalcula nivel al aplicar xp_awards. */
+    xp?: number;
     hp: { current: number; max: number; temp: number };
     ac: number;
     notableItems: string[];
@@ -194,7 +196,9 @@ function renderPlayers(p: SessionSnapshot["players"], locale: AppLocale | undefi
   const lv = normalizeLocale(locale) === "en" ? "lv" : "nv";
   return p
     .map((x) => {
-      const head = `- [${x.id}] ${x.name} (${x.race} ${x.class} ${L.levelAbbr}${x.level}) · ${L.hpLabel} ${x.hp.current}/${x.hp.max}${x.hp.temp ? ` (+${x.hp.temp} ${L.tempHp})` : ""} · ${L.acLabel} ${x.ac}${x.statusEffects.length ? ` · [${x.statusEffects.join(", ")}]` : ""}`;
+      const xpPart =
+        typeof x.xp === "number" && Number.isFinite(x.xp) ? ` · XP ${Math.floor(x.xp)}` : "";
+      const head = `- [${x.id}] ${x.name} (${x.race} ${x.class} ${L.levelAbbr}${x.level})${xpPart} · ${L.hpLabel} ${x.hp.current}/${x.hp.max}${x.hp.temp ? ` (+${x.hp.temp} ${L.tempHp})` : ""} · ${L.acLabel} ${x.ac}${x.statusEffects.length ? ` · [${x.statusEffects.join(", ")}]` : ""}`;
       const eq = x.equipment?.length
         ? `\n    ${L.equipment} ${x.equipment
             .slice(0, 12)

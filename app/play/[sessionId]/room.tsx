@@ -135,6 +135,7 @@ export function PlayRoom({
     return null;
   });
   const [currentData, setCurrentData] = useState<CharData>(() => picked?.character?.data ?? {});
+  const [liveLevel, setLiveLevel] = useState(() => picked?.character?.level ?? 1);
   const [tab, setTab] = useState<Tab>("personaje");
   const [chatSubTab, setChatSubTab] = useState<ChatSubTab>("group");
   const [chat, setChat] = useState<ChatMsg[]>([]);
@@ -158,12 +159,13 @@ export function PlayRoom({
 
   useEffect(() => {
     if (picked?.character?.data) setCurrentData(picked.character.data);
+    if (picked?.character?.level != null) setLiveLevel(picked.character.level);
   }, [picked]);
 
   const hp = currentData.hp ?? { current: 0, max: 0, temp: 0 };
   const ac = currentData.ac ?? 10;
   const speed = currentData.speed ?? 30;
-  const level = picked?.character?.level ?? 1;
+  const level = liveLevel;
   const prof = profBonus(level);
   const statusEffects = currentData.statusEffects ?? [];
 
@@ -204,7 +206,8 @@ export function PlayRoom({
           ...prev,
           {
             id: Math.random().toString(36).slice(2),
-            from: msg.role === "dm" ? "dm" : mine ? "me" : "dm",
+            from:
+              msg.role === "system" ? "system" : msg.role === "dm" ? "dm" : mine ? "me" : "dm",
             text: msg.text,
             kind: (msg.kind as "public" | "private") ?? "public",
           },
@@ -304,9 +307,13 @@ export function PlayRoom({
       setTab("dados");
     });
 
-    s.on("character:update", (evt: { playerId: string; patch: Partial<CharData> }) => {
+    s.on("character:update", (evt: { playerId: string; patch: Partial<CharData> & { level?: number } }) => {
       if (evt.playerId !== picked.player_id) return;
-      setCurrentData((prev) => ({ ...prev, ...evt.patch }));
+      if (typeof evt.patch.level === "number") setLiveLevel(evt.patch.level);
+      setCurrentData((prev) => {
+        const { level: _omitLevel, ...rest } = evt.patch;
+        return { ...prev, ...rest };
+      });
     });
 
     socketRef.current = s;

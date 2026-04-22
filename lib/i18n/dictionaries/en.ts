@@ -227,6 +227,8 @@ export const dictionaryEn: Record<string, string> = {
   "storyRoom.dice.request":
     "🎯 The DM asks {{who}} to roll {{expression}}{{labelParen}}{{dcPart}}.",
   "storyRoom.system.continue": "— the DM picks up the thread —",
+  "dm.levelUp.system":
+    "📈 **{{name}}** advances from level {{from}} to **{{to}}** (total XP: {{xp}}). Your sheet is updated; check max HP, proficiency bonus, spell slots, and class features (PHB).",
   "storyRoom.stream.noBody": "no stream",
   "storyRoom.stream.dmError": "Error: {{message}}",
   "storyRoom.image.genFailed": "generation failed",

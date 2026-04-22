@@ -308,11 +308,19 @@ export function StoryRoom({
     );
     s.on("character:update", (evt: { playerId: string; patch: Record<string, unknown> }) => {
       setPlayers((prev) =>
-        prev.map((p) =>
-          p.playerId === evt.playerId && p.character
-            ? { ...p, character: { ...p.character, data: { ...p.character.data, ...evt.patch } } }
-            : p
-        )
+        prev.map((p) => {
+          if (p.playerId !== evt.playerId || !p.character) return p;
+          const { level: lvPatch, ...dataPatch } = evt.patch;
+          const nextLevel = typeof lvPatch === "number" ? lvPatch : p.character.level;
+          return {
+            ...p,
+            character: {
+              ...p.character,
+              level: nextLevel,
+              data: { ...p.character.data, ...dataPatch },
+            },
+          };
+        })
       );
     });
     s.on(
