@@ -1,169 +1,224 @@
-# Mesa — The AI Dungeon Master
+<p align="center">
+  <img src="docs/readme-banner.svg" alt="Mesa — mesa de rol con IA (banner)" width="920" />
+</p>
 
-> A fullstack, local-first **AI tabletop platform** for Dungeons & Dragons 5E. Your Dungeon Master is a language model. Your narrator uses local or cloud TTS. Your scenes are generated on demand. Your friends join from their phones by scanning a QR code.
+<h1 align="center">Mesa</h1>
 
-Mesa runs an end-to-end AI stack — **LLM + RAG + TTS + image generation** — orchestrated around a real D&D 5E rules engine, so the magic feels like a real game table, not a chatbot.
+<p align="center">
+  <strong>Plataforma de rol local-first donde la inteligencia artificial impulsa toda la experiencia de juego</strong><br/>
+  narración, consulta de reglas, voz, escenas visuales y sincronización multidispositivo alrededor de un motor real de D&amp;D 5E.
+</p>
 
----
-
-## Why this is different
-
-Most AI D&D tools are thin wrappers over ChatGPT. Mesa is the opposite: a real game client with a real rules engine, where AI is a first-class citizen at every layer.
-
-- **Local-first by design.** Runs entirely on your machine with Ollama + system TTS (`say` on macOS, `espeak-ng` on Linux). Zero API keys required to play.
-- **Bring-your-own-provider.** Plug in OpenAI, Anthropic, Gemini, OpenRouter, Groq, xAI Grok, Stability, or ElevenLabs from an in-app settings panel. Keys are encrypted at rest with **AES-256-GCM**.
-- **Grounded in the rules.** A built-in **RAG pipeline over the Player's Handbook** (SQLite + `sqlite-vec` + `nomic-embed-text`) means the DM cites actual mechanics, not hallucinated ones.
-- **Multi-device out of the box.** Scan a QR, join from your phone over LAN. Realtime sync via Socket.IO.
-- **Structured AI output.** The DM answers in a parsed `<narrative>` + `<actions>` contract that directly mutates game state — HP, inventory, dice requests, map updates — no brittle prompt parsing tricks.
-
----
-
-## The AI stack
-
-### Narrative engine — your Dungeon Master
-A language model drives the fiction, interprets player intent, and emits game-state actions.
-
-| Provider | Models |
-|---|---|
-| **Ollama** (local, default) | `gemma4:e2b`, `llama3.1`, `qwen2.5`, `mistral`, any model you pull |
-| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `o4-mini` |
-| **Anthropic** | `claude-opus-4`, `claude-3.7-sonnet`, `claude-3.5-sonnet`, `claude-3.5-haiku` |
-| **Google Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` |
-| **OpenRouter / Groq** | any OpenAI-compatible model on the gateway |
-| **xAI Grok** | `grok-4-1-fast-reasoning` (default), same API for chat and Imagine images |
-| **Custom endpoint** | vLLM, LM Studio, LiteLLM, anything OpenAI-shaped |
-
-### Retrieval-Augmented Generation (RAG)
-`scripts/ingest-handbook.ts` chunks, embeds and indexes the **Player's Handbook** into a vector store built on **SQLite + sqlite-vec**. Before every DM response, `retrieveRules()` pulls the top-k relevant passages so answers stay canonical.
-
-### Image generation — living scenes
-Generate maps, tokens, portraits and scene backdrops on the fly.
-
-- **OpenAI** — `gpt-image-1`, `dall-e-3`
-- **Google Imagen** — `imagen-3.0-generate-002`
-- **Stability** — `sd3.5-large`, `sd3.5-medium`, `core`
-- **xAI Grok Imagine** — `grok-imagine-image`, `grok-imagine-image-pro`
-- **Disabled** — falls back to a procedural canvas with fog-of-war + grid
-
-### Voice & narration (TTS)
-Every narrative message is speakable, per-message, per-voice.
-
-- **System TTS** *(local, no network, no API tokens)* — macOS **`say`** (output converted to WAV with **`afconvert`**); Linux **`espeak-ng`**. Default Spanish voice on Mac: `Paulina` (`es-mx`). List macOS voices with `say -v '?'`.
-- **OpenAI TTS** — `gpt-4o-mini-tts` with `alloy`, `coral`, `nova`, …
-- **ElevenLabs** — `eleven_multilingual_v2`, `eleven_turbo_v2_5`
-- **Web Speech API** — zero-setup fallback using the OS voice
+<p align="center">
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://socket.io/"><img src="https://img.shields.io/badge/Socket.IO-4-010101?style=flat-square&logo=socketdotio&logoColor=white" alt="Socket.IO" /></a>
+  <a href="https://www.sqlite.org/"><img src="https://img.shields.io/badge/SQLite-vec-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
+  <a href="https://ollama.com/"><img src="https://img.shields.io/badge/Ollama-local-111111?style=flat-square&logo=ollama&logoColor=white" alt="Ollama" /></a>
+  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind-3-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind" /></a>
+</p>
 
 ---
 
-## Features
+## Visión: la IA no es un accesorio, es el motor de la mesa
 
-1. **`/story/new` → `/story/[id]` — Live session.** AI narrator, side chat, central canvas with grid map, per-message TTS, realtime player state. Optionally **upload an adventure PDF** — it is ingested into a per-story RAG index, summarized into an outline, and used by the DM as the canonical source of truth (the DM only improvises where the module is silent).
-2. **`/character/new` — Character builder.** Step-by-step wizard: race, class, background, ability scores (standard array / point buy / 4d6), skills, details. Export to a fillable **Spanish PDF sheet** via `GET /api/character/[id]/pdf`.
-3. **`/` — The Vault.** All your stories and characters in one place.
-4. **`/play/[sessionId]` — Mobile companion.** Phone-optimized view joined via QR on the host's LAN. Tabs: Character, Actions, Chat (public/private), Dice.
-5. **`/settings` — Control room.** Per-role provider selection (chat / image / voice), encrypted API keys, dice mode per seat (auto/manual), SFX, model health, handbook re-ingest button.
+En **Mesa**, el modelo de lenguaje actúa como **Dungeon Master**: interpreta intención, mantiene coherencia narrativa y emite **acciones estructuradas** que el servidor aplica sobre un estado de partida real (HP, mapa, dados, inventario). Eso evita el patrón «chatbot + anotaciones manuales» y acerca el flujo a una mesa física digitalizada.
 
----
+| Capa | Qué hace la IA / la automatización |
+|------|-------------------------------------|
+| **Narrativa (LLM)** | Genera ficción, diálogo del mundo y decisiones de tono; opera en modos **auto** (DM pleno) y **asistente**. |
+| **Reglas (RAG)** | Antes de cada respuesta, **recupera fragmentos del Player's Handbook** (vectores + FTS) para anclar mecánicas y reducir invención de reglas. |
+| **Aventura (RAG opcional)** | Si subes un **PDF de módulo**, se indexa por historia: el DM usa ese material como fuente de verdad donde exista texto; improvisa solo en silencios del documento. |
+| **Voz (TTS)** | Cada mensaje de narración puede leerse en alto: **TTS del sistema** (sin API), OpenAI, ElevenLabs o **Web Speech** en el cliente. |
+| **Visuales** | Mapas, retratos y fondos con proveedores de imagen (o lienzo procedural con niebla y cuadrícula si está desactivado). |
 
-## How the DM turn works
+Flujo resumido del turno del DM:
 
-```
-Player message
-   ↓
-POST /api/chat  { sessionId, text }
-   ↓
-Server snapshots the session (players, HP, summary)
-   ↓
-RAG: retrieveRules(text)  →  top-k chunks from the Handbook
-   ↓
-Prompt assembled → LLM (Ollama / OpenAI / Anthropic / …)
-   ↓
-Model returns:
-   <narrative> … </narrative>
-   <actions>   { …json… } </actions>
-   ↓
-Narrative → chat (streamed to TTS if enabled)
-Actions   → mutate game state (HP, items, dice requests, map)
-   ↓
-Socket.IO fan-out → every connected device
+```mermaid
+flowchart LR
+  A[Jugador escribe] --> B["POST /api/chat"]
+  B --> C[Snapshot SQLite: sesión, personajes, estado JSON]
+  C --> D["RAG: retrieveRules() + aventura si hay PDF"]
+  D --> E["Prompt + streaming al proveedor de chat"]
+  E --> F["parse: &lt;narrative&gt; + &lt;actions&gt; JSON"]
+  F --> G["applyDmActions() → muta estado"]
+  G --> H["Socket.IO → host + móviles"]
+  F --> I["TTS opcional por mensaje"]
 ```
 
-To trim **LLM input tokens** per DM turn (env knobs and measurement script), see [docs/llm-token-reduction-runbook.md](docs/llm-token-reduction-runbook.md).
+---
+
+## Por qué no es «otro wrapper de ChatGPT»
+
+- **Motor 5E real** en TypeScript (`lib/rules-engine`, esquemas Zod): la IA opera *sobre* reglas y estado persistidos, no solo sobre texto libre.
+- **Salida contractual**: el modelo devuelve bloques **`<narrative>`** y **`<actions>`**; el servidor valida y aplica — menos parsing frágil y más control de juego.
+- **Local-first**: por defecto **Ollama** + embeddings **`nomic-embed-text`** + TTS de sistema (`say` / `espeak-ng`). Sin claves en la nube puedes jugar en LAN.
+- **BYOK cifrado**: claves opcionales (OpenAI, Anthropic, Gemini, OpenRouter, Groq, xAI, Stability, ElevenLabs) en panel de ajustes, **AES-256-GCM** en reposo (`data/.keyring`).
+- **Multidispositivo**: QR en la mesa del anfitrión; compañeros en **`/play/[sessionId]`** con chat, dados y estado en tiempo real.
 
 ---
 
-## Requirements
+## Procesos técnicos (detalle)
+
+### 1. Servidor híbrido `server.ts` + Next.js
+
+No es solo `next dev`: **`tsx server.ts`** crea un **HTTP server de Node**, adjunta **Next** como request handler y monta **Socket.IO** en el mismo puerto (`path: /socket.io`). Así las rutas `/api/*` y las páginas App Router conviven con **WebSockets** para fan-out de estado sin un backend separado.
+
+### 2. Ingesta RAG del Player's Handbook
+
+`npm run ingest:handbook` ejecuta `scripts/ingest-handbook.ts`:
+
+1. **Extracción** de texto del PDF del PHB (pdf.js).
+2. **Chunking** por secciones lógicas (`server/rules/chunker.ts`).
+3. **Embeddings** vía Ollama (`embed` en `server/ollama.ts`) con `DND_EMBED_MODEL` (por defecto `nomic-embed-text`).
+4. **Persistencia** en SQLite: tablas de chunks + índice vectorial **`sqlite-vec`** (`handbook_vec`) y, cuando aplica, **FTS** (`handbook_fts`) para BM25.
+
+En tiempo de juego, `retrieveRules()` (`server/rag.ts`) combina **búsqueda vectorial** (similitud coseno / distance en sqlite-vec) con **fallback o refuerzo FTS** si el vectorial falla o falta índice — el resultado se inyecta en el prompt del DM con presupuesto de tokens (`server/dm/prompt-budget.ts`).
+
+### 3. Turno de chat `POST /api/chat` (`app/api/chat/route.ts`)
+
+1. Carga **sesión** y **historia** desde **better-sqlite3** (`lib/db.ts`).
+2. Parsea `state_json` (mapa de batalla, iniciativa, resumen, tono, dificultad, etc.).
+3. Ensambla **jugadores** con sus hojas (`character.data_json`).
+4. **RAG de reglas** según el texto del jugador y el modo de combate.
+5. Si la historia tiene **PDF de aventura**, `retrieveAdventure` / outline (`server/adventure.ts`) aporta contexto de módulo.
+6. Construye el prompt (`server/dm/prompts.ts`: `buildAutoDmPrompt` / `buildAssistantDmPrompt`, tracker de combate, etc.).
+7. **Streaming** al proveedor configurado (`server/providers/chat.ts`: Ollama, OpenAI-compatible, Anthropic, Gemini…).
+8. Al cerrar el stream: **`parseDmResponse`** extrae narrativa y JSON de acciones.
+9. **`applyDmActions`** (`server/dm/apply-actions.ts`) muta estado (dados pedidos, HP, tokens en grid, objetos, flags de escena…).
+10. Persiste en SQLite y emite eventos por **`getIo()`** (`server/io-bus.ts`) a clientes Socket.IO.
+
+Para optimizar tokens de entrada existe el runbook [docs/llm-token-reduction-runbook.md](docs/llm-token-reduction-runbook.md) y el script `npm run measure:dm-prompts`.
+
+### 4. Tiempo real (Socket.IO)
+
+`server/socket.ts` registra handlers; el cliente (mesa + móvil) se suscribe a la misma URL LAN. Cada mutación relevante del estado se **fan-out** a todos los asientos: la mesa principal y los teléfonos permanecen coherentes sin polling agresivo.
+
+### 5. TTS `POST /api/tts` (`app/api/tts/route.ts` + `server/system-tts.ts`)
+
+- **Sistema**: macOS usa **`/usr/bin/say`** y convierte a WAV con **`afconvert`**; Linux usa **`espeak-ng`**.
+- **Cloud**: OpenAI / ElevenLabs según ajustes.
+- **Cliente**: si el servidor no puede sintetizar, el navegador puede usar **Web Speech API**.
+
+### 6. Imágenes `POST /api/image` (`server/providers/image.ts`)
+
+El mismo panel de proveedores enruta a OpenAI, Google Imagen, Stability o xAI Imagine; si la generación está desactivada o falla, la UI mantiene **canvas procedural** (rejilla, niebla, tokens).
+
+### 7. Personajes y PDF
+
+El asistente de creación (`/character/new`) persiste en SQLite; **`GET /api/character/[id]/pdf`** genera una **hoja rellenable en español** vía `pdf-lib` (`server/character-pdf.ts`).
+
+---
+
+## Funciones principales
+
+| Ruta | Rol |
+|------|-----|
+| **`/`** | La Bóveda: historias y personajes. |
+| **`/story/new` → `/story/[id]`** | Sesión en vivo: narrador IA, chat lateral, lienzo con mapa, TTS por mensaje, opción de **subir PDF de aventura** (ingesta + resumen + RAG por historia). |
+| **`/character/new`** | Constructor paso a paso (raza, clase, atributos, habilidades, exportación PDF). |
+| **`/play/[sessionId]`** | Vista móvil (personaje, acciones, chat, dados) enlazada por QR en LAN. |
+| **`/settings`** | Sala de control: proveedor por rol (chat / imagen / voz), claves cifradas, modo de dados, SFX, re-ingesta del manual. |
+
+---
+
+## Requisitos
 
 - **Node.js ≥ 20**
-- **[Ollama](https://ollama.com)** running locally at `http://localhost:11434`
-  - `ollama pull gemma4:e2b` — default narrator model
-  - `ollama pull nomic-embed-text` — embeddings for RAG
-- **TTS local (sin instalación extra en macOS):** el narrador usa el binario **`/usr/bin/say`** y **`afconvert`**, incluidos en el sistema. En **Linux**, instala `espeak-ng` (`apt install espeak-ng` o `brew install espeak-ng`). Si el servidor no puede sintetizar audio, el cliente usa la **Web Speech API** del navegador.
+- **[Ollama](https://ollama.com)** en `http://localhost:11434` (o `OLLAMA_HOST`)
+  - `ollama pull gemma4:e2b` — narrador por defecto
+  - `ollama pull nomic-embed-text` — embeddings RAG
+- **TTS local**: en macOS no hace falta nada extra (`say` + `afconvert`). En Linux: `espeak-ng`.
 
 ---
 
-## Install & run
+## Instalación y arranque
 
 ```bash
-cd /Users/quielo/Personal/dnd
+git clone <tu-repo> && cd dnd
 npm install
-ollama pull nomic-embed-text      # embeddings for RAG
-npm run ingest:handbook           # indexes the Player's Handbook (takes several minutes)
-npm run dev                       # http://localhost:3000  (override with PORT=3030)
+ollama pull nomic-embed-text
+npm run ingest:handbook    # indexa el Player's Handbook (varios minutos)
+npm run dev                # http://localhost:3000 (o PORT=3030)
 ```
 
-The LAN URL used for the mobile QR is auto-detected by the server.
+La URL LAN para el QR la detecta el servidor automáticamente.
 
 ---
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Custom Next.js + Socket.IO server (`server.ts`) |
-| `npm run build` | Production build |
-| `npm start` | Production server |
-| `npm run ingest:handbook [path-to-pdf]` | Re-index the Player's Handbook |
+| Comando | Descripción |
+|---------|-------------|
+| `npm run dev` | Servidor Node + Next + Socket.IO (`tsx server.ts`) |
+| `npm run build` / `npm start` | Build y producción |
+| `npm run ingest:handbook [ruta-pdf]` | Reindexar el PHB |
+| `npm run measure:dm-prompts` | Medir tamaño de prompts del DM |
 
 ---
 
-## Environment variables
+## Variables de entorno
 
-| Variable | Default / purpose |
-|---|---|
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` |
-| `DND_MODEL` | `gemma4:e2b` |
-| `DND_EMBED_MODEL` | `nomic-embed-text` |
-| `SYSTEM_TTS_VOICE` | (opcional) Nombre de voz por defecto para `say` / `espeak-ng` si no configuras otra en ajustes |
-| `PORT` | `3000` |
-| `DND_SECRET` | Seed to encrypt stored API keys. If unset, a random secret is generated at `data/.keyring` |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `STABILITY_API_KEY`, `ELEVENLABS_API_KEY` | Fallbacks if you don't store the key via `/settings` |
+| Variable | Uso |
+|----------|-----|
+| `OLLAMA_HOST` | Por defecto `http://127.0.0.1:11434` |
+| `DND_MODEL` | Modelo de chat Ollama por defecto (`gemma4:e2b`) |
+| `DND_EMBED_MODEL` | Embeddings (`nomic-embed-text`) |
+| `SYSTEM_TTS_VOICE` | Voz por defecto para TTS de sistema |
+| `PORT` | Puerto HTTP (búsqueda de puerto libre si está ocupado) |
+| `DND_SECRET` | Semilla para cifrado de claves; si falta, se genera `data/.keyring` |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, … | *Fallback* si no guardaste la clave en `/settings` |
 
-> API keys entered in the UI are encrypted with **AES-256-GCM** using a local keyring (`data/.keyring`). They never leave the machine.
+Las claves introducidas en la UI se cifran con **AES-256-GCM** y no salen del equipo.
 
 ---
 
-## Architecture
+## Arquitectura de carpetas
+
+```mermaid
+flowchart TB
+  subgraph client [Cliente]
+    A[Next.js App Router]
+    B[Componentes + Tailwind + Motion]
+  end
+  subgraph server [Servidor Node]
+    C[server.ts HTTP + Socket.IO]
+    D[API routes /api/*]
+    E[server/dm prompts parse apply]
+    F[server/rag adventure providers]
+  end
+  subgraph data [Persistencia]
+    G[(SQLite + sqlite-vec)]
+  end
+  A --> D
+  D --> E
+  E --> F
+  F --> G
+  C --> A
+  E --> C
+```
 
 ```
-app/          Next.js App Router — pages + API routes (/api/…)
-server/       Server-only logic — Ollama, RAG, dice, system TTS, DM prompts, Socket.IO, LAN
-lib/          5E engine (rules, Zod schemas) + DB (better-sqlite3 + sqlite-vec)
-components/   Shared UI
-scripts/      one-shot RAG ingest pipeline
-data/         SQLite, caches, assets (gitignored)
+app/          Páginas y rutas API
+server/       DM, RAG, aventura, TTS, sockets, red LAN, proveedores
+lib/          Motor 5E, esquemas, acceso SQLite
+components/   UI compartida
+scripts/      Ingesta one-shot del manual
+data/         BD, cachés, assets (gitignored)
 ```
 
-**Key tech:** Next.js 14 · TypeScript · Socket.IO · Tailwind · Framer Motion · better-sqlite3 · sqlite-vec · Ollama · system TTS · pdf-lib · Zod.
+**Stack:** Next.js 14 · TypeScript · Socket.IO · Tailwind · Framer Motion · better-sqlite3 · sqlite-vec · Ollama · pdf-lib · Zod.
 
 ---
 
 ## Roadmap
 
-- Encounter panel for assistant mode (initiative tracker, reachable attacks per tile).
-- Curated map/token library under `data/assets/`.
-- Inline SFX mixing via `[sfx:*]` tags in the narrative stream.
+- Panel de encuentro (iniciativa, alcance por casilla).
+- Biblioteca curada de mapas/tokens bajo `data/assets/`.
+- Mezcla de SFX inline vía etiquetas `[sfx:*]` en el stream narrativo.
 
 ---
 
-*Roll for initiative.*
+<p align="center">
+  <em>Que los dados —y los embeddings— te favorezcan.</em>
+</p>

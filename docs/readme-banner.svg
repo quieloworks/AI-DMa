@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-labelledby="t d">
+  <title id="t">Mesa  mesa de rol con IA</title>
+  <desc id="d">Banner: gradiente oscuro, dado y texto Mesa</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#085041"/>
+      <stop offset="45%" stop-color="#1a1a18"/>
+      <stop offset="100%" stop-color="#3c3489"/>
+    </linearGradient>
+    <radialGradient id="h1" cx="18%" cy="22%" r="55%">
+      <stop offset="0%" stop-color="#5dcaa5" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="h2" cx="88%" cy="15%" r="40%">
+      <stop offset="0%" stop-color="#afa9ec" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="320" fill="url(#bg)"/>
+  <rect width="1200" height="320" fill="url(#h1)"/>
+  <rect width="1200" height="320" fill="url(#h2)"/>
+  <g opacity="0.12" fill="none" stroke="#f1efe8" stroke-width="0.5">
+    <path d="M0 80 H1200 M0 160 H1200 M0 240 H1200"/>
+    <path d="M120 0 V320 M240 0 V320 M360 0 V320"/>
+  </g>
+  <!-- icosaedro estilizado (silueta) -->
+  <g transform="translate(1000 72) scale(1.15)" opacity="0.95">
+    <polygon points="100,20 160,55 160,125 100,160 40,125 40,55" fill="#1d9e75" stroke="#e1f5ee" stroke-width="1.2"/>
+    <polygon points="100,20 160,55 100,90 40,55" fill="#0f6e56" stroke="#e1f5ee" stroke-width="0.8"/>
+    <polygon points="160,55 160,125 100,90" fill="#639922" stroke="#eaf3de" stroke-width="0.6" opacity="0.85"/>
+    <polygon points="40,55 40,125 100,90" fill="#534ab7" stroke="#eeedfe" stroke-width="0.6" opacity="0.9"/>
+    <circle cx="100" cy="78" r="6" fill="#f1efe8" opacity="0.9"/>
+    <circle cx="82" cy="102" r="4" fill="#f1efe8" opacity="0.55"/>
+    <circle cx="118" cy="102" r="4" fill="#f1efe8" opacity="0.55"/>
+  </g>
+  <text x="56" y="118" fill="#f1efe8" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="500">Mesa</text>
+  <text x="58" y="168" fill="#b4b2a9" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="21">Tu partida de D&amp;D 5E con IA como narrador, ùrbitro de reglas y voz en off.</text>
+  <text x="58" y="206" fill="#97c459" font-family="ui-monospace, Menlo, monospace" font-size="14" letter-spacing="0.04em">LLM ù RAG (Player&apos;s Handbook) ù TTS ù visuales ù estado estructurado ù Socket.IO</text>
+  <rect x="56" y="232" width="520" height="3" fill="#5dcaa5" opacity="0.55"/>
+</svg>
