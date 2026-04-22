@@ -127,6 +127,13 @@ const snapCombat = {
     { player_id: "p2", value: 12 },
     { player_id: "npc:goblin-a", value: 14 },
   ],
+  combatTracker: {
+    round: 1,
+    initiative_index: 0,
+    turn_of: "p1",
+    phase: "awaiting_dice" as const,
+    note: "Tirada de ataque (espada larga)",
+  },
 };
 measure("combat ON + default", buildAutoDmPrompt(snapCombat, rulesFull, { kind: "continue" }, capsDefault));
 measure("combat ON + savings", buildAutoDmPrompt(snapCombat, rulesFull, { kind: "continue" }, capsSavings));

@@ -4,9 +4,11 @@ import { getDb } from "@/lib/db";
 import {
   buildAutoDmPrompt,
   buildAssistantDmPrompt,
+  coerceCombatTracker,
   parseDmResponse,
   normalizeDifficulty,
   type Difficulty,
+  type SessionCombatTracker,
   type SessionSnapshot,
   type TurnAction,
 } from "@/server/dm/prompts";
@@ -89,6 +91,7 @@ export async function POST(req: NextRequest) {
     initiative?: Array<{ player_id: string; value: number }>;
     combat?: boolean;
     battleMap?: BattleMap | null;
+    combatTracker?: SessionCombatTracker | null;
   };
 
   let state: PersistedState = {};
@@ -170,6 +173,7 @@ export async function POST(req: NextRequest) {
     adventureSourceName: storyData.sourceFileName ?? null,
     combat: state.combat === true,
     battleMap: state.battleMap ?? null,
+    combatTracker: state.combatTracker ?? null,
   };
 
   const ragBudget = getDmRagBudget();
@@ -375,6 +379,10 @@ export async function POST(req: NextRequest) {
           if (!nextCombat) {
             nextState.battleMap = null;
             nextState.initiative = [];
+            delete nextState.combatTracker;
+          } else {
+            const ct = coerceCombatTracker(actObj.combat_tracker);
+            if (ct) nextState.combatTracker = ct;
           }
 
           db.prepare("UPDATE session SET state_json = ?, updated_at = ? WHERE id = ?").run(

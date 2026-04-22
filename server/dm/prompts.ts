@@ -17,6 +17,58 @@ export type SessionBattleMap = {
   obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
 };
 
+/** Fases del reloj de combate 5E (PHB: asalto → iniciativa → turnos en orden → siguiente ronda). No es “turno de app”. */
+export type CombatTrackerPhase =
+  | "initiative"
+  | "awaiting_dice"
+  | "same_turn_resolution"
+  | "turn_open"
+  | "between_actors";
+
+/** Estado explícito del reloj de batalla; lo emite el DM en <acciones> y la app lo persiste. */
+export type SessionCombatTracker = {
+  /** Ronda de combate 5E, empieza en 1 cuando el primer turno tras iniciativa está en juego. */
+  round: number;
+  /** Índice 0…n-1 en la cola de iniciativa (mismo orden que INICIATIVA: mayor tirada primero). */
+  initiative_index: number;
+  /** player_id del PJ ([id]) o id de participants (p. ej. npc:goblin-1) cuyo turno o resolución bloquea el reloj. */
+  turn_of: string;
+  phase: CombatTrackerPhase;
+  /** Una línea en español: qué falta (p. ej. "Tirada de daño del golpe de Lía"). */
+  note?: string;
+};
+
+const COMBAT_TRACKER_PHASES = new Set<string>([
+  "initiative",
+  "awaiting_dice",
+  "same_turn_resolution",
+  "turn_open",
+  "between_actors",
+]);
+
+/** Normaliza combat_tracker del JSON del modelo; null = ausente o inválido. */
+export function coerceCombatTracker(raw: unknown): SessionCombatTracker | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const round = Number(o.round);
+  const initiative_index = Number(o.initiative_index);
+  const turn_of = typeof o.turn_of === "string" ? o.turn_of.trim() : "";
+  const phaseStr = typeof o.phase === "string" ? o.phase.trim() : "";
+  if (!Number.isFinite(round) || round < 1 || round > 999) return null;
+  if (!Number.isFinite(initiative_index) || initiative_index < 0 || initiative_index > 99) return null;
+  if (!turn_of || turn_of.length > 160) return null;
+  if (!COMBAT_TRACKER_PHASES.has(phaseStr)) return null;
+  const phase = phaseStr as CombatTrackerPhase;
+  const note = typeof o.note === "string" ? o.note.trim().slice(0, 220) : undefined;
+  return {
+    round: Math.floor(round),
+    initiative_index: Math.floor(initiative_index),
+    turn_of,
+    phase,
+    ...(note ? { note } : {}),
+  };
+}
+
 export type SessionSnapshot = {
   storyTitle: string;
   mode: "auto" | "assistant";
@@ -57,6 +109,8 @@ export type SessionSnapshot = {
   combat?: boolean;
   /** Mapa de batalla actual; la fuente de verdad para posiciones y obstáculos durante el combate. */
   battleMap?: SessionBattleMap | null;
+  /** Reloj estricto de combate (ronda, iniciativa, fase dentro del turno). */
+  combatTracker?: SessionCombatTracker | null;
 };
 
 export type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -170,6 +224,45 @@ function renderInitiative(snap: SessionSnapshot): string {
   return `INICIATIVA (orden de turno, mayor primero): ${sorted.map((i) => `${initiativeDisplayName(snap, i.player_id)}=${i.value}`).join(" → ")}`;
 }
 
+function combatPhaseLabelEs(phase: CombatTrackerPhase): string {
+  switch (phase) {
+    case "initiative":
+      return "iniciativa (orden antes del primer turno)";
+    case "awaiting_dice":
+      return "esperando tirada obligatoria para cerrar un paso mecánico";
+    case "same_turn_resolution":
+      return "cerrando el mismo turno (p. ej. daño tras impacto, salvaciones del mismo ataque)";
+    case "turn_open":
+      return "turno activo: el actor puede declarar movimiento/acción sin dado bloqueante pendiente";
+    case "between_actors":
+      return "puente narrativo entre combatientes (no consumas aún el turno del siguiente)";
+    default:
+      return phase;
+  }
+}
+
+function renderCombatTracker(snap: SessionSnapshot): string {
+  const t = snap.combatTracker;
+  if (!t || !isCombatWorkflow(snap)) return "";
+  const sorted = snap.initiative?.length ? [...snap.initiative].sort((a, b) => b.value - a.value) : [];
+  const ordered = sorted.map((i) => `${initiativeDisplayName(snap, i.player_id)}=${i.value}`).join(" → ");
+  const cur = initiativeDisplayName(snap, t.turn_of);
+  const nextLine =
+    sorted.length && t.initiative_index + 1 < sorted.length
+      ? `Siguiente en iniciativa: ${initiativeDisplayName(snap, sorted[t.initiative_index + 1]!.player_id)}.`
+      : sorted.length
+        ? "Tras terminar el turno del último en cola: nueva ronda 5E (reacciones recuperadas, etc.) — vuelve al primero de la lista."
+        : "";
+  return [
+    "RELOJ DE COMBATE (PHB: asalto → iniciativa → turnos en orden → siguiente ronda). Esto manda sobre “continuar historia”: avanza **fases mecánicas**, no “saltos de turno” arbitrarios.",
+    `- Ronda 5E: ${t.round} · fase: ${combatPhaseLabelEs(t.phase)} [phase=${t.phase}]`,
+    `- Actor que bloquea el reloj: ${cur} (turn_of=${t.turn_of}) · initiative_index=${t.initiative_index} (0 = primero en la lista INICIATIVA de arriba)`,
+    t.note ? `- Pendiente explícito: ${t.note}` : "- Pendiente: describe en note qué falta (ej. daño del golpe, salvación de CON, tirada de salvación de muerte).",
+    sorted.length ? `- Cola actual: ${ordered}` : "- Cola: falta initiative[] completo en estado.",
+    nextLine,
+  ].join("\n");
+}
+
 function renderBattleMapSummary(snap: SessionSnapshot): string {
   const bm = snap.battleMap;
   if (!bm?.grid) return "";
@@ -270,6 +363,7 @@ const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores
 const TECHNICAL_SCENE_RULE = `INFORMACIÓN TÁCTICA (celdas, rejilla, coordenadas, recuentos de pies de precisión, “tres cuartos de cobertura” como etiqueta, etc.): solo en <acciones>/battle_map o cuando un jugador la solicite de forma explícita (p. ej. botón “escena/terreno” o mensaje pidiendo cómo está colocado el campo). En narración normal, sugiere espacio con lenguaje de ficción: “a un salto de distancia”, “detrás del muro apenas ves sombras”, “el flechazo pasa rozándote” — no exhaustivo ni cartográfico.`;
 
 const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
+- combat_tracker: con combat:true incluye combat_tracker{round:1,initiative_index:0,turn_of:"(id del primero que actuará tras iniciativa o quien tenga sorpresa/asalto según PHB)",phase:"initiative",note:"…"} y actualízalo en cada mensaje de combate.
 - INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
 - Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
 - Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
@@ -277,12 +371,19 @@ const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y bat
 - Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
 
 const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
+
+RELOJ Y combat_tracker (obligatorio en cada <acciones> con combat:true):
+- Emite siempre combat_tracker{round,initiative_index,turn_of,phase,note?} alineado con la realidad del momento. initiative_index cuenta 0 en el **primero** de la lista INICIATIVA (mayor tirada primero). turn_of = id del combatiente activo (PJ = [id] de JUGADORES; NPC = mismo id que participants[].id).
+- **Ronda 5E (PHB):** todos los combatientes actúan una vez cada uno en orden de iniciativa; al terminar el último de la cola, incrementa round y vuelve initiative_index a 0 (el primero de la cola).
+- **Turno de criatura (PHB):** movimiento, acción, acción adicional si un rasgo la otorga, acción bonus si aplica, interacción con objeto gratuita razonable. El turno **no termina** hasta que hayas resuelto **todas** las piezas mecánicas de ese actor para ese turno: si pediste tirada de ataque y hay impacto o crítico, **en la misma respuesta o en la fase inmediata** pide tirada de daño (dice_requests) y resuelve hp_changes antes de mover initiative_index al siguiente. Si hay varios ataques (Extra Attack, etc.), cada ataque = ataque → (si procede) daño, en secuencia, mismo turno.
+- **Fases phase:** initiative (solo orden); awaiting_dice (salida bloqueada por dados); same_turn_resolution (ya hay resultado de dado y falta aplicar daño/salvación encadenada del **mismo** ataque o efecto); turn_open (el actor puede declarar sin dado obligatorio pendiente); between_actors (solo transición breve; el siguiente turno no “gasta” acciones hasta que declares turn_open con el nuevo turn_of).
+- El botón “continuar historia” del grupo = **siguiente fase mecánica** (p. ej. resolver impacto → pedir daño), **no** “siguiente turno” si phase es awaiting_dice o same_turn_resolution. Prohibido saltar initiative_index mientras el turno del actor actual tenga resoluciones pendientes (ataque sin daño, salvación obligatoria del mismo golpe, etc.).
+- Integración “nombrar ≥2 jugadores”: en awaiting_dice / same_turn_resolution centrada en un actor, los demás solo reacción sensorial breve; **no** invites a otro PJ a gastar su turno 5E si no es su turn_of salvo reacción/regla PHB.
 - Continuidad del mapa: MAPEO TÁCTICO del snapshot + battle_map en JSON es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
 - Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, actualiza JSON y **narra el momento en prosa** (p. ej. muro que se derrumba), no un parte de geometría.
 - NARRATIVA CINEMATOGRÁFICA (por defecto): cuento de lo que pasa a nivel humano (miedo, esfuerzo, sangre, ruido, relaciones). Sin tutoriales de mapa. Si hace falta claridad espacial, una o dos frases evocativas bastan — no capítulos.
 - Si un jugador pide ver el campo (petición dedicada): entonces SÍ puedes ofrecer descripción de escenario y disposición con más detalle (aún así preferible lenguaje narrativo antes que tabla de coordenadas), sin adelantar tiradas pendientes.
 - TURNOS ENEMIGOS (orden): nombra al enemigo activo y su turno. Si un hostil ataca, dilo explícitamente ("el bandido actúa y te ataca con…") antes del resultado mecánico; tras impacto, indica daño y tipo si aplica (p. ej. "8 cortante"). Si falla, dilo. No mezcles varios enemigos en un solo párrafo sin dejar claro quién pega a quién.
-- Orden de iniciativa: respeta INICIATIVA; un solo turno activo por narración (quien corresponda en la cola); los demás solo reacción u oportunidades donde el manual lo permita. Al cerrar la cola, nueva ronda (reacciones recuperadas, duraciones "hasta el final de tu siguiente turno", etc., según 5E).
 - Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
 - Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
 - Ataques: d20 + mod + maestría (si competencia) vs CA; crítico natural 20 / pifia 1 en d20 de ataque; daño con tirada aparte. Cobertura, línea de efecto, alcance, visión a oscuras según escena y reglas.
@@ -305,6 +406,7 @@ const SHEET_AUTHORITY_LOCKS = `CANDADOS DE FICHA (ley del juego):
 
 const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO (inviolable):
 - Si el éxito no es obvio (ataque, conjuro, habilidad, salvación, iniciativa, etc.), PARA la narración antes del desenlace y emite dice_requests por player_id (cada entrada con "id" estable único en camel/snake no importa, pero reutiliza el mismo id si repites la misma petición). No uses "all" salvo que todos tiren exactamente lo mismo.
+- Ataque PHB: primero tirada de ataque; si impacta o es crítico, **tirada de daño del mismo ataque** antes de avanzar initiative_index / turn_of al siguiente combatiente. Si pides ataque y aún no hay daño resuelto, combat_tracker.phase debe ser awaiting_dice o same_turn_resolution y note debe decir explícitamente qué falta (p. ej. "daño del golpe").
 - Mientras haya tiradas pendientes listadas en EVENTOS RECIENTES (pendiente de dados) o hayas emitido dice_requests en ESTE turno sin tener aún los resultados reales del jugador, NO adelantes la trama, NO narras desenlace del intento, NO pasas turno narrativo a otro foco salvo puras percepciones que no dependan de ese resultado. Limítate a: pedir dados, aclarar duda breve, o revocar peticiones invalidadas.
 - Si algo invalida una tirada ya pedida (acción imposible, objetivo muerto, ventana cerrada), lista esos ids en dice_revoke en <acciones> para que la interfaz las retire; no sigas esperando ese dado.
 - Si no hay tirada necesaria, dilo en una frase y resuelve. Si la acción es imposible por ficha (CANDADOS DE FICHA), no es "incertidumbre": niega sin tirada y no pidas dados.`;
@@ -317,8 +419,8 @@ const FORMAT = `SALIDA (español): solo dos bloques.
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
-player_id en tiradas: id de JUGADORES, "all", o "npc:…". Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (obligatorio si combat:true; ver COMBATE activo), initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+player_id en tiradas: id de JUGADORES, "all", o "npc:…". En dice_requests.expression usa NdM con modificadores numéricos (1d20+5) o, si quieres que la app los resuelva sola, sumandos PB y atributos en MAYÚSCULAS: FUE DES CON INT SAB CAR (p. ej. 1d20+INT+PB). Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
 Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.
@@ -367,6 +469,7 @@ JUGADORES:
 ${renderPlayers(snap.players)}
 ${init ? "\n" + init : ""}
 ${mapBlock ? "\n" + mapBlock : ""}
+${renderCombatTracker(snap) ? "\n" + renderCombatTracker(snap) : ""}
 
 ${snap.recentLog?.length ? `EVENTOS RECIENTES:\n${snap.recentLog.slice(-8).join("\n")}` : ""}
 ${adventureBlock ? "\n" + adventureBlock + "\n" : ""}
@@ -392,6 +495,7 @@ JUGADORES:
 ${renderPlayers(snap.players)}
 ${renderInitiative(snap) ? "\n" + renderInitiative(snap) : ""}
 ${renderBattleMapSummary(snap) ? "\n" + renderBattleMapSummary(snap) : ""}
+${renderCombatTracker(snap) ? "\n" + renderCombatTracker(snap) : ""}
 
 ${adventureBlock ? adventureBlock + "\n\n" : ""}HANDBOOK:
 ${renderRulesContextForPrompt(rulesContext, ragCaps)}
@@ -448,12 +552,18 @@ export function buildAutoDmPrompt(
     return buildOpeningPrompt(snap, rulesContext, caps);
   }
   if (action.kind === "continue") {
+    const combatClock =
+      snap.combat || snap.initiative?.length
+        ? `
+- COMBATE / “Continuar historia”: esto NO es “pasar al siguiente turno de iniciativa” por defecto. Es **avanzar la siguiente fase mecánica** del RELOJ DE COMBATE / combat_tracker: si quedaba daño u otra tirada del **mismo** ataque o del **mismo** turn_of, pédela o resuélvela ahora; actualiza phase (awaiting_dice / same_turn_resolution / turn_open / between_actors) y note. Solo incrementa initiative_index y cambia turn_of cuando el turno 5E del actor actual esté **cerrado** (sin dados obligatorios pendientes de ese turno).
+- Si RELOJ DE COMBATE aparece arriba, sincroniza combat_tracker con él salvo que las tiradas en Señales o EVENTOS RECIENTES obliguen a corregir.`
+        : "";
     user = `Continúa desde el último momento narrativo.
 - Una frase resume lo que plantearon los jugadores (si hubo mensajes).
 - TIRADAS (crítico): en el bloque "Señales recientes" pueden aparecer líneas que empiezan con 🎲 o "Tirada:" — son resultados **ya obtenidos** del jugador en la crónica. Debes resolver ese desenlace mecánico y narrativo ahora; **no vuelvas a pedir la misma tirada** ni repitas el mismo bloque de petición de dados si ya hay resultado explícito aquí abajo. Si algo invalidó la tirada, usa dice_revoke.
 - Si EVENTOS RECIENTES (arriba en el system) mencionan "Pendiente tirada" sin resultado en Señales, sigue esperando dados o revoca.
-- Avanza escena: consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA y battle_map en JSON; narrativa cinematográfica salvo petición de escena.
-- Invita a actuar rotando foco.${action.recentSignals?.length ? `\nSeñales recientes (incluye tiradas resueltas):\n- ${action.recentSignals.join("\n- ")}` : ""}`;
+- Avanza escena: consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA, battle_map y combat_tracker en JSON; narrativa cinematográfica salvo petición de escena.
+- Invita a actuar rotando foco (fuera de combate o en turn_open del actor que le toca).${combatClock}${action.recentSignals?.length ? `\nSeñales recientes (incluye tiradas resueltas):\n- ${action.recentSignals.join("\n- ")}` : ""}`;
   } else if (action.sceneInfoRequest) {
     user = `Jugador ${action.playerName} solicita INFORMACIÓN DE ESCENA Y CAMPO (combate).
 Responde en <narrativa> SOLO con:

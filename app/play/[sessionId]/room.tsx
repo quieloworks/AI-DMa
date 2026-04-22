@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
+import {
+  canResolveDmDiceExpression,
+  resolveDmDiceExpression,
+} from "@/lib/dm-dice-expression";
 
 type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
 
@@ -106,6 +110,13 @@ export function PlayRoom({
   initialCombat?: boolean;
 }) {
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2) + Date.now().toString(36));
+  const socketRef = useRef<Socket | null>(null);
+  const rollCtxRef = useRef({
+    prof: 2,
+    data: {} as CharData,
+    playerId: "",
+    sessionId: "",
+  });
   const [picked, setPicked] = useState<Player | null>(() => {
     if (initialPlayerId && initialToken) {
       const found = players.find((p) => p.player_id === initialPlayerId && p.token === initialToken);
@@ -116,7 +127,6 @@ export function PlayRoom({
   const [currentData, setCurrentData] = useState<CharData>(() => picked?.character?.data ?? {});
   const [tab, setTab] = useState<Tab>("personaje");
   const [chatSubTab, setChatSubTab] = useState<ChatSubTab>("group");
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [recentRolls, setRecentRolls] = useState<DiceResult[]>([]);
@@ -130,9 +140,29 @@ export function PlayRoom({
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
+  const flashToast = useCallback((text: string) => {
+    setActionToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setActionToast(null), 2200);
+  }, []);
+
   useEffect(() => {
     if (picked?.character?.data) setCurrentData(picked.character.data);
   }, [picked]);
+
+  const hp = currentData.hp ?? { current: 0, max: 0, temp: 0 };
+  const ac = currentData.ac ?? 10;
+  const speed = currentData.speed ?? 30;
+  const level = picked?.character?.level ?? 1;
+  const prof = profBonus(level);
+  const statusEffects = currentData.statusEffects ?? [];
+
+  rollCtxRef.current = {
+    prof,
+    data: currentData,
+    playerId: picked?.player_id ?? "",
+    sessionId,
+  };
 
   useEffect(() => {
     if (!picked) return;
@@ -182,8 +212,6 @@ export function PlayRoom({
       }) => {
         setRecentRolls((prev) => [evt.result, ...prev].slice(0, 12));
         const mine = evt.by.playerId === picked.player_id;
-        // Solo reflejar en el chat la tirada que responde a una petición del DM;
-        // otros dados de la sección no cuentan como acción y no deben llenar el chat.
         if (mine && evt.requestId) {
           setChat((prev) => [
             ...prev,
@@ -195,11 +223,51 @@ export function PlayRoom({
             },
           ]);
         }
-        if (evt.requestId) {
+        if (evt.requestId && mine) {
+          setPendingDice((prev) => {
+            const cur = prev.find((r) => r.id === evt.requestId);
+            if (!cur) return prev;
+            const dc = cur.dc;
+            const passed = typeof dc !== "number" || evt.result.total >= dc;
+            if (!passed) {
+              flashToast(`Total ${evt.result.total} · CD ${dc} — no supera; vuelve a tirar con el botón inferior`);
+              return prev;
+            }
+            const next = prev.filter((r) => r.id !== evt.requestId);
+            const head = next[0];
+            if (
+              head &&
+              canResolveDmDiceExpression(head.expression, rollCtxRef.current.prof, rollCtxRef.current.data)
+            ) {
+              queueMicrotask(() => {
+                const s2 = socketRef.current;
+                const c2 = rollCtxRef.current;
+                if (!s2 || !c2.playerId) return;
+                const h2 = head;
+                const expr = resolveDmDiceExpression(h2.expression, c2.prof, c2.data);
+                s2.emit("dice:roll", {
+                  sessionId: c2.sessionId,
+                  by: {
+                    role: "player",
+                    playerId: c2.playerId,
+                    label: h2.label ?? "Solicitado por el DM",
+                  },
+                  expression: expr,
+                  requestId: h2.id,
+                });
+              });
+            }
+            return next;
+          });
+        } else if (evt.requestId) {
           setPendingDice((prev) => prev.filter((r) => r.id !== evt.requestId));
         }
       }
     );
+
+    s.on("dice:error", (evt: { message?: string }) => {
+      flashToast(evt.message ?? "Tirada inválida");
+    });
 
     s.on("dice:revoke", (evt: { sessionId: string; requestIds: string[] }) => {
       if (evt.sessionId !== sessionId || !Array.isArray(evt.requestIds)) return;
@@ -222,14 +290,8 @@ export function PlayRoom({
         label: r.label,
         dc: r.dc,
       }));
-      setPendingDice((prev) => [...norm, ...prev].slice(0, 6));
-      const first = norm[0];
-      if (first) {
-        setSelectedDice(first.expression);
-        setSelectedLabel(first.label ?? "");
-        setDiceModifier(0);
-        setTab("dados");
-      }
+      setPendingDice((prev) => [...prev, ...norm].slice(0, 6));
+      setTab("dados");
     });
 
     s.on("character:update", (evt: { playerId: string; patch: Partial<CharData> }) => {
@@ -237,28 +299,16 @@ export function PlayRoom({
       setCurrentData((prev) => ({ ...prev, ...evt.patch }));
     });
 
-    setSocket(s);
+    socketRef.current = s;
     return () => {
+      socketRef.current = null;
       s.disconnect();
     };
-  }, [picked, sessionId]);
+  }, [picked, sessionId, flashToast]);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, tab, chatSubTab]);
-
-  const hp = currentData.hp ?? { current: 0, max: 0, temp: 0 };
-  const ac = currentData.ac ?? 10;
-  const speed = currentData.speed ?? 30;
-  const level = picked?.character?.level ?? 1;
-  const prof = profBonus(level);
-  const statusEffects = currentData.statusEffects ?? [];
-
-  const flashToast = useCallback((text: string) => {
-    setActionToast(text);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setActionToast(null), 1800);
-  }, []);
 
   const triggerDm = useCallback(
     async (text: string, opts?: { sceneInfoRequest?: boolean }) => {
@@ -309,8 +359,10 @@ export function PlayRoom({
       options?: { triggerDm?: boolean; sceneInfoRequest?: boolean }
     ) => {
       const trimmed = text.trim();
-      if (!trimmed || !picked || !socket) return;
-      socket.emit("chat:send", {
+      if (!trimmed || !picked) return;
+      const s = socketRef.current;
+      if (!s) return;
+      s.emit("chat:send", {
         sessionId,
         role: "player",
         playerId: picked.player_id,
@@ -326,20 +378,22 @@ export function PlayRoom({
         void triggerDm(trimmed, options.sceneInfoRequest ? { sceneInfoRequest: true } : undefined);
       }
     },
-    [picked, sessionId, socket, triggerDm]
+    [picked, sessionId, triggerDm]
   );
 
   const roll = useCallback(
     (expression: string, label?: string, requestId?: string) => {
-      if (!picked || !socket) return;
-      socket.emit("dice:roll", {
+      if (!picked) return;
+      const s = socketRef.current;
+      if (!s) return;
+      s.emit("dice:roll", {
         sessionId,
         by: { role: "player", playerId: picked.player_id, label },
         expression,
         requestId,
       });
     },
-    [picked, sessionId, socket]
+    [picked, sessionId]
   );
 
   const groupChat = useMemo(() => chat.filter((m) => m.kind === "public"), [chat]);
@@ -355,27 +409,37 @@ export function PlayRoom({
     [input, sendChat, tab, chatSubTab]
   );
 
-  const rollPending = useCallback(
-    (req: DiceRequest) => {
-      roll(req.expression, req.label ?? "Solicitado por el DM", req.id);
-    },
-    [roll]
-  );
+  const rollVirtualForActiveRequest = useCallback(() => {
+    const head = pendingDice[0];
+    if (!head || !picked) return;
+    if (!canResolveDmDiceExpression(head.expression, prof, currentData)) {
+      flashToast("No se puede resolver la expresión (p. ej. INT/PB); registra el total arriba.");
+      return;
+    }
+    const rx = resolveDmDiceExpression(head.expression, prof, currentData);
+    roll(rx, head.label ?? "Solicitado por el DM", head.id);
+  }, [pendingDice, picked, prof, currentData, roll, flashToast]);
 
   const rollSelected = useCallback(() => {
+    if (pendingDice.length > 0) {
+      rollVirtualForActiveRequest();
+      return;
+    }
     let expr = selectedDice;
     if (diceModifier !== 0 && /^\d+d\d+$/.test(selectedDice)) {
       expr = `${selectedDice}${diceModifier >= 0 ? "+" : ""}${diceModifier}`;
     }
     roll(expr, selectedLabel || undefined);
-  }, [selectedDice, selectedLabel, diceModifier, roll]);
+  }, [pendingDice, rollVirtualForActiveRequest, selectedDice, selectedLabel, diceModifier, roll]);
 
   const reportManualTotal = useCallback(
     (req: DiceRequest, total: number) => {
-      if (!picked || !socket) return;
+      if (!picked) return;
+      const s = socketRef.current;
+      if (!s) return;
       if (!Number.isFinite(total)) return;
       const breakdown = `Total manual: ${total} (${req.expression}${req.label ? ` · ${req.label}` : ""})`;
-      socket.emit("dice:report", {
+      s.emit("dice:report", {
         sessionId,
         by: { role: "player", playerId: picked.player_id, label: req.label ?? "Solicitado por el DM" },
         expression: req.expression,
@@ -385,7 +449,7 @@ export function PlayRoom({
         breakdown,
       });
     },
-    [picked, sessionId, socket]
+    [picked, sessionId]
   );
 
   if (!picked) {
@@ -694,7 +758,6 @@ export function PlayRoom({
                 setSelectedLabel(label ?? "");
               }}
               onModifier={setDiceModifier}
-              onRollPending={rollPending}
               onRoll={rollSelected}
               onReportManual={reportManualTotal}
               onDismiss={(id) => setPendingDice((prev) => prev.filter((r) => r.id !== id))}
@@ -1021,7 +1084,6 @@ function DicePanel({
   prof,
   onSelect,
   onModifier,
-  onRollPending,
   onRoll,
   onReportManual,
   onDismiss,
@@ -1035,7 +1097,6 @@ function DicePanel({
   prof: number;
   onSelect: (expr: string, label?: string) => void;
   onModifier: (m: number) => void;
-  onRollPending: (r: DiceRequest) => void;
   onRoll: () => void;
   onReportManual: (r: DiceRequest, total: number) => void;
   onDismiss: (id: string) => void;
@@ -1060,12 +1121,30 @@ function DicePanel({
 
   const [manualById, setManualById] = useState<Record<string, string>>({});
 
+  const queueVirtualLine = useMemo(() => {
+    const head = pending[0];
+    if (!head) return null;
+    const ok = canResolveDmDiceExpression(head.expression, prof, data);
+    const resolved = ok ? resolveDmDiceExpression(head.expression, prof, data) : head.expression;
+    return {
+      index: 1,
+      total: pending.length,
+      resolved,
+      label: head.label,
+      dc: head.dc,
+      resolvable: ok,
+    };
+  }, [pending, prof, data]);
+
   return (
     <div className="space-y-3">
       {pending.length > 0 && (
         <div className="card" style={{ border: "1px solid var(--color-accent)" }}>
           <p className="label mb-2" style={{ color: "var(--color-accent)" }}>
             El DM pide tiradas ({pending.length})
+          </p>
+          <p className="mb-2 text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+            Dado físico: escribe el total y pulsa «Registrar». La tirada virtual va en el botón naranja abajo (primera en cola; si hay CD y la superas, sigue la siguiente sola).
           </p>
           <div className="space-y-2">
             {pending.map((r) => (
@@ -1082,18 +1161,15 @@ function DicePanel({
                       {r.dc ? ` · CD ${r.dc}` : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button className="btn-accent" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onRollPending(r)}>
-                      Tirar
-                    </button>
-                    <button
-                      className="btn-ghost"
-                      style={{ padding: "6px 10px", fontSize: 12 }}
-                      onClick={() => onDismiss(r.id)}
-                    >
-                      ✕
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="btn-ghost shrink-0"
+                    style={{ padding: "6px 10px", fontSize: 12 }}
+                    onClick={() => onDismiss(r.id)}
+                    title="Descartar esta petición"
+                  >
+                    ✕
+                  </button>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -1186,12 +1262,31 @@ function DicePanel({
 
       <button
         className="btn-accent w-full"
-        style={{ padding: "12px", fontSize: 16 }}
+        style={{ padding: "12px", fontSize: 14 }}
         onClick={onRoll}
+        disabled={Boolean(queueVirtualLine && !queueVirtualLine.resolvable)}
       >
-        🎲 Tirar {selected}
-        {modifier !== 0 ? formatMod(modifier) : ""}
-        {selectedLabel ? ` · ${selectedLabel}` : ""}
+        {queueVirtualLine ? (
+          <>
+            <span className="block text-[11px] font-medium opacity-90">
+              Tirada virtual {queueVirtualLine.index}/{queueVirtualLine.total}
+              {typeof queueVirtualLine.dc === "number" ? ` · CD ${queueVirtualLine.dc}` : ""}
+            </span>
+            <span className="mt-0.5 block">
+              🎲 Tirar {queueVirtualLine.resolved}
+              {queueVirtualLine.label ? ` · ${queueVirtualLine.label}` : ""}
+            </span>
+            {!queueVirtualLine.resolvable ? (
+              <span className="mt-1 block text-[11px] opacity-90">Usa «Registrar» arriba para esta petición</span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            🎲 Tirar {selected}
+            {modifier !== 0 ? formatMod(modifier) : ""}
+            {selectedLabel ? ` · ${selectedLabel}` : ""}
+          </>
+        )}
       </button>
 
       {recent.length > 0 && (
