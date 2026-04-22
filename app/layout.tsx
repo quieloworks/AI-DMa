@@ -1,15 +1,24 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { LocaleProvider } from "@/components/LocaleProvider";
+import { getGlobalSettings } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/t";
 
-export const metadata: Metadata = {
-  title: "Mesa — Dungeon Master",
-  description: "D&D 5E con IA local como Dungeon Master",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = getGlobalSettings().locale;
+  return {
+    title: t(locale, "meta.title"),
+    description: t(locale, "meta.description"),
+  };
+}
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = getGlobalSettings().locale;
   return (
-    <html lang="es">
-      <body className="min-h-screen antialiased">{children}</body>
+    <html lang={locale}>
+      <body className="min-h-screen antialiased">
+        <LocaleProvider locale={locale}>{children}</LocaleProvider>
+      </body>
     </html>
   );
 }

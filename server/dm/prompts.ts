@@ -1,5 +1,8 @@
 import type { RetrievedChunk } from "../rag";
 import type { AdventureChunk } from "../adventure";
+import type { AppLocale } from "@/lib/i18n/locale";
+import { normalizeLocale } from "@/lib/i18n/locale";
+import { getDmLocaleBlocks } from "./prompt-locale-bundle";
 
 /** Estado táctico persistido (alineado con battle_map en acciones y en UI). */
 export type SessionBattleMap = {
@@ -111,6 +114,8 @@ export type SessionSnapshot = {
   battleMap?: SessionBattleMap | null;
   /** Reloj estricto de combate (ronda, iniciativa, fase dentro del turno). */
   combatTracker?: SessionCombatTracker | null;
+  /** DM prompt language (matches global app locale). */
+  locale?: AppLocale;
 };
 
 export type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -145,8 +150,13 @@ function mergeRagCaps(partial?: Partial<DmRagRenderCaps>): DmRagRenderCaps {
   };
 }
 
-export function renderRulesContextForPrompt(chunks: RetrievedChunk[], caps: DmRagRenderCaps): string {
-  if (!chunks.length) return "(sin reglas recuperadas)";
+export function renderRulesContextForPrompt(
+  chunks: RetrievedChunk[],
+  caps: DmRagRenderCaps,
+  locale?: AppLocale,
+): string {
+  const L = getDmLocaleBlocks(locale);
+  if (!chunks.length) return L.emptyRules;
   const max = Math.max(120, caps.rulesChunkChars);
   return chunks
     .map(
@@ -156,8 +166,13 @@ export function renderRulesContextForPrompt(chunks: RetrievedChunk[], caps: DmRa
     .join("\n\n");
 }
 
-export function renderAdventureChunksForPrompt(chunks: AdventureChunk[] | undefined, caps: DmRagRenderCaps): string {
-  if (!chunks || !chunks.length) return "(sin fragmentos recuperados)";
+export function renderAdventureChunksForPrompt(
+  chunks: AdventureChunk[] | undefined,
+  caps: DmRagRenderCaps,
+  locale?: AppLocale,
+): string {
+  const L = getDmLocaleBlocks(locale);
+  if (!chunks || !chunks.length) return L.emptyAdventureChunks;
   const max = Math.max(120, caps.adventureChunkChars);
   return chunks
     .map(
@@ -174,36 +189,38 @@ function sliceJoin(items: string[], max: number, sep = ", "): string {
   return shown.join(sep) + tail;
 }
 
-function renderPlayers(p: SessionSnapshot["players"]): string {
+function renderPlayers(p: SessionSnapshot["players"], locale: AppLocale | undefined): string {
+  const L = getDmLocaleBlocks(locale);
+  const lv = normalizeLocale(locale) === "en" ? "lv" : "nv";
   return p
     .map((x) => {
-      const head = `- [${x.id}] ${x.name} (${x.race} ${x.class} nv.${x.level}) · HP ${x.hp.current}/${x.hp.max}${x.hp.temp ? ` (+${x.hp.temp} temp)` : ""} · CA ${x.ac}${x.statusEffects.length ? ` · [${x.statusEffects.join(", ")}]` : ""}`;
+      const head = `- [${x.id}] ${x.name} (${x.race} ${x.class} ${L.levelAbbr}${x.level}) · ${L.hpLabel} ${x.hp.current}/${x.hp.max}${x.hp.temp ? ` (+${x.hp.temp} ${L.tempHp})` : ""} · ${L.acLabel} ${x.ac}${x.statusEffects.length ? ` · [${x.statusEffects.join(", ")}]` : ""}`;
       const eq = x.equipment?.length
-        ? `\n    equipo: ${x.equipment
+        ? `\n    ${L.equipment} ${x.equipment
             .slice(0, 12)
             .map((e) => (e.qty > 1 ? `${e.qty}× ${e.name}` : e.name))
             .join(", ")}`
         : "";
       const spells = x.spellsKnown?.length
-        ? `\n    conjuros: ${x.spellsKnown
+        ? `\n    ${L.spells} ${x.spellsKnown
             .slice(0, 10)
-            .map((s) => `${s.name}(nv${s.level}${s.prepared ? "✓" : ""})`)
+            .map((s) => `${s.name}(${lv}${s.level}${s.prepared ? "✓" : ""})`)
             .join(", ")}`
         : "";
       const slots = x.spellSlots && Object.keys(x.spellSlots).length
-        ? `\n    slots: ${Object.entries(x.spellSlots)
-            .map(([lvl, s]) => `nv${lvl} ${s.max - s.used}/${s.max}`)
+        ? `\n    ${L.slots} ${Object.entries(x.spellSlots)
+            .map(([lvl, s]) => `${lv}${lvl} ${s.max - s.used}/${s.max}`)
             .join(", ")}`
         : "";
       const pr = x.proficiencies;
       let profLine = "";
       if (pr && (pr.armor.length || pr.weapons.length || pr.tools.length || (pr.languages?.length ?? 0))) {
         const bits: string[] = [];
-        if (pr.armor.length) bits.push(`armaduras: ${sliceJoin(pr.armor, 8)}`);
-        if (pr.weapons.length) bits.push(`armas: ${sliceJoin(pr.weapons, 10)}`);
-        if (pr.tools.length) bits.push(`herramientas: ${sliceJoin(pr.tools, 8)}`);
-        if (pr.languages?.length) bits.push(`idiomas: ${sliceJoin(pr.languages, 6)}`);
-        profLine = `\n    competencias: ${bits.join(" · ")}`;
+        if (pr.armor.length) bits.push(`${L.profArmor} ${sliceJoin(pr.armor, 8)}`);
+        if (pr.weapons.length) bits.push(`${L.profWeapons} ${sliceJoin(pr.weapons, 10)}`);
+        if (pr.tools.length) bits.push(`${L.profTools} ${sliceJoin(pr.tools, 8)}`);
+        if (pr.languages?.length) bits.push(`${L.profLanguages} ${sliceJoin(pr.languages, 6)}`);
+        profLine = `\n    ${L.proficiencies} ${bits.join(" · ")}`;
       }
       return head + eq + spells + slots + profLine;
     })
@@ -220,28 +237,34 @@ function initiativeDisplayName(snap: SessionSnapshot, playerId: string): string 
 
 function renderInitiative(snap: SessionSnapshot): string {
   if (!snap.initiative?.length) return "";
+  const L = getDmLocaleBlocks(snap.locale);
   const sorted = [...snap.initiative].sort((a, b) => b.value - a.value);
-  return `INICIATIVA (orden de turno, mayor primero): ${sorted.map((i) => `${initiativeDisplayName(snap, i.player_id)}=${i.value}`).join(" → ")}`;
+  return `${L.initiativeHeading} ${sorted.map((i) => `${initiativeDisplayName(snap, i.player_id)}=${i.value}`).join(" → ")}`;
 }
 
-function combatPhaseLabelEs(phase: CombatTrackerPhase): string {
-  switch (phase) {
-    case "initiative":
-      return "iniciativa (orden antes del primer turno)";
-    case "awaiting_dice":
-      return "esperando tirada obligatoria para cerrar un paso mecánico";
-    case "same_turn_resolution":
-      return "cerrando el mismo turno (p. ej. daño tras impacto, salvaciones del mismo ataque)";
-    case "turn_open":
-      return "turno activo: el actor puede declarar movimiento/acción sin dado bloqueante pendiente";
-    case "between_actors":
-      return "puente narrativo entre combatientes (no consumas aún el turno del siguiente)";
-    default:
-      return phase;
-  }
+function combatPhaseLabelLocalized(phase: CombatTrackerPhase, locale: AppLocale | undefined): string {
+  const es: Record<CombatTrackerPhase, string> = {
+    initiative: "iniciativa (orden antes del primer turno)",
+    awaiting_dice: "esperando tirada obligatoria para cerrar un paso mecánico",
+    same_turn_resolution:
+      "cerrando el mismo turno (p. ej. daño tras impacto, salvaciones del mismo ataque)",
+    turn_open: "turno activo: el actor puede declarar movimiento/acción sin dado bloqueante pendiente",
+    between_actors: "puente narrativo entre combatientes (no consumas aún el turno del siguiente)",
+  };
+  const en: Record<CombatTrackerPhase, string> = {
+    initiative: "initiative (ordering before the first turn)",
+    awaiting_dice: "waiting on a mandatory roll to finish a mechanical step",
+    same_turn_resolution:
+      "resolving the same turn (e.g. damage after a hit, saves from the same attack)",
+    turn_open: "active turn: the actor may declare movement/action with no blocking roll pending",
+    between_actors: "brief narrative bridge between combatants (do not advance the next turn yet)",
+  };
+  const map = normalizeLocale(locale) === "en" ? en : es;
+  return map[phase] ?? phase;
 }
 
 function renderCombatTracker(snap: SessionSnapshot): string {
+  const L = getDmLocaleBlocks(snap.locale);
   const t = snap.combatTracker;
   if (!t || !isCombatWorkflow(snap)) return "";
   const sorted = snap.initiative?.length ? [...snap.initiative].sort((a, b) => b.value - a.value) : [];
@@ -249,30 +272,32 @@ function renderCombatTracker(snap: SessionSnapshot): string {
   const cur = initiativeDisplayName(snap, t.turn_of);
   const nextLine =
     sorted.length && t.initiative_index + 1 < sorted.length
-      ? `Siguiente en iniciativa: ${initiativeDisplayName(snap, sorted[t.initiative_index + 1]!.player_id)}.`
+      ? `${L.combatNextInit} ${initiativeDisplayName(snap, sorted[t.initiative_index + 1]!.player_id)}.`
       : sorted.length
-        ? "Tras terminar el turno del último en cola: nueva ronda 5E (reacciones recuperadas, etc.) — vuelve al primero de la lista."
+        ? L.combatRoundWrap
         : "";
   return [
-    "RELOJ DE COMBATE (PHB: asalto → iniciativa → turnos en orden → siguiente ronda). Esto manda sobre “continuar historia”: avanza **fases mecánicas**, no “saltos de turno” arbitrarios.",
-    `- Ronda 5E: ${t.round} · fase: ${combatPhaseLabelEs(t.phase)} [phase=${t.phase}]`,
-    `- Actor que bloquea el reloj: ${cur} (turn_of=${t.turn_of}) · initiative_index=${t.initiative_index} (0 = primero en la lista INICIATIVA de arriba)`,
-    t.note ? `- Pendiente explícito: ${t.note}` : "- Pendiente: describe en note qué falta (ej. daño del golpe, salvación de CON, tirada de salvación de muerte).",
-    sorted.length ? `- Cola actual: ${ordered}` : "- Cola: falta initiative[] completo en estado.",
+    L.combatClockTitle,
+    `${L.combatRoundPrefix} ${t.round}${L.combatPhaseMid} ${combatPhaseLabelLocalized(t.phase, snap.locale)} [phase=${t.phase}]`,
+    `${L.combatActorBlocks} ${cur} (turn_of=${t.turn_of}) · initiative_index=${t.initiative_index} ${L.initiativeIndexHint}`,
+    t.note ? `${L.combatPendingExplicit} ${t.note}` : L.combatPendingGeneric,
+    sorted.length ? `${L.combatQueueComplete} ${ordered}` : L.combatQueueMissing,
     nextLine,
   ].join("\n");
 }
 
 function renderBattleMapSummary(snap: SessionSnapshot): string {
+  const L = getDmLocaleBlocks(snap.locale);
   const bm = snap.battleMap;
   if (!bm?.grid) return "";
   const cf = bm.grid.cellFeet ?? 5;
-  const head = `MAPEO TÁCTICO: terreno=${bm.terrain ?? "—"} · rejilla ${bm.grid.cols}×${bm.grid.rows} celdas (~${cf} pies/celda)`;
+  const feetWord = normalizeLocale(snap.locale) === "en" ? "ft" : "pies";
+  const head = `${L.battleMapIntro}${bm.terrain ?? "—"} · grid ${bm.grid.cols}×${bm.grid.rows} cells (~${cf} ${feetWord}/cell)`;
   const parts = (bm.participants ?? [])
     .slice(0, 28)
     .map((p) => {
       const hp =
-        p.hp !== undefined ? ` HP${p.hp.current}/${p.hp.max}` : "";
+        p.hp !== undefined ? ` ${L.hpLabel}${p.hp.current}/${p.hp.max}` : "";
       const st = p.status?.length ? ` [${p.status.join(", ")}]` : "";
       return `${p.name}(${p.id}·${p.kind}) @(${p.x},${p.y})${hp}${st}`;
     });
@@ -281,11 +306,9 @@ function renderBattleMapSummary(snap: SessionSnapshot): string {
     const h = o.h ?? 1;
     return `(${o.x},${o.y})${w}×${h}${o.kind ? ` ${o.kind}` : ""}`;
   });
-  const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} más` : "";
+  const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} ${L.moreSuffix}` : "";
   const tailO = (bm.obstacles?.length ?? 0) > 20 ? ` …+${(bm.obstacles?.length ?? 0) - 20}` : "";
-  const narr =
-    "Uso interno (y para <acciones>/JSON): coherencia mecánica PHB. En <narrativa> NO repitas rejilla, coordenadas, (x,y), casillas ni listas de pies salvo que un jugador pida explícitamente detalle táctico: allí cuento literario (tensión, imagen, consecuencias) aunque el mapa sea preciso aquí.";
-  return [head, `Participantes: ${parts.join("; ")}${tailP}`, obs.length ? `Obstáculos: ${obs.join("; ")}${tailO}` : "", narr]
+  return [head, `${L.participantsLabel} ${parts.join("; ")}${tailP}`, obs.length ? `${L.obstaclesLabel} ${obs.join("; ")}${tailO}` : "", L.battleMapNarratorNote]
     .filter(Boolean)
     .join("\n");
 }
@@ -294,157 +317,142 @@ function isCombatWorkflow(snap: SessionSnapshot): boolean {
   return snap.combat === true || Boolean(snap.initiative?.length);
 }
 
-function difficultyGuide(difficulty: Difficulty | undefined): { label: string; directive: string } {
+function difficultyGuide(
+  difficulty: Difficulty | undefined,
+  locale: AppLocale | undefined,
+): { label: string; directive: string } {
   const d = normalizeDifficulty(difficulty);
+  const en = normalizeLocale(locale) === "en";
   if (d === "facil") {
-    return {
-      label: "Fácil",
-      directive:
-        "DIFICULTAD Fácil: CD habilidad 8-11, ataques enemigos +3/+4, salv CD 10-11; pocos enemigos, tácticas simples; pistas y recuperación generosas; evita bajar a 0 HP salvo fallos repetidos.",
-    };
+    return en
+      ? {
+          label: "Easy",
+          directive:
+            "DIFFICULTY Easy: DC 8–11, enemy attacks +3/+4, saves DC 10–11; few enemies; simple tactics; generous clues/recovery; avoid dropping to 0 HP unless repeated failures.",
+        }
+      : {
+          label: "Fácil",
+          directive:
+            "DIFICULTAD Fácil: CD habilidad 8-11, ataques enemigos +3/+4, salv CD 10-11; pocos enemigos, tácticas simples; pistas y recuperación generosas; evita bajar a 0 HP salvo fallos repetidos.",
+        };
   }
   if (d === "dificil") {
-    return {
-      label: "Difícil",
-      directive:
-        "DIFICULTAD Difícil: CD habilidad 15-18, ataques +6/+8, salv CD 14-16; encuentros duros DMG, tácticas óptimas, entorno hostil; poca info gratis; 0 HP posible con reglas estrictas.",
-    };
+    return en
+      ? {
+          label: "Hard",
+          directive:
+            "DIFFICULTY Hard: DC 15–18, attacks +6/+8, saves DC 14–16; hard DMG encounters; optimal tactics; hostile environment; little free info; 0 HP possible with strict rules.",
+        }
+      : {
+          label: "Difícil",
+          directive:
+            "DIFICULTAD Difícil: CD habilidad 15-18, ataques +6/+8, salv CD 14-16; encuentros duros DMG, tácticas óptimas, entorno hostil; poca info gratis; 0 HP posible con reglas estrictas.",
+        };
   }
   if (d === "experto") {
-    return {
-      label: "Experto",
-      directive:
-        "DIFICULTAD Experto: CD 17-22, ataques +8/+11, salv CD 16-19; límite mortal DMG; enemigos coordinados (concentración, control); recursos escasos; muerte permanente posible; reglas sin suavizar.",
-    };
+    return en
+      ? {
+          label: "Expert",
+          directive:
+            "DIFFICULTY Expert: DC 17–22, attacks +8/+11, saves DC 16–19; deadly DMG limits; coordinated enemies (focus fire, control); scarce resources; permanent death possible; no soft rules.",
+        }
+      : {
+          label: "Experto",
+          directive:
+            "DIFICULTAD Experto: CD 17-22, ataques +8/+11, salv CD 16-19; límite mortal DMG; enemigos coordinados (concentración, control); recursos escasos; muerte permanente posible; reglas sin suavizar.",
+        };
   }
-  return {
-    label: "Medio",
-    directive:
-      "DIFICULTAD Medio (5E): CD habilidad 12-14, ataques +5/+6, salv CD 13; encuentros DMG medio/difícil ocasional; tácticas sensatas con errores aprovechables; reto sin castigo gratuito.",
-  };
+  return en
+    ? {
+        label: "Medium",
+        directive:
+          "DIFFICULTY Medium (5E): DC 12–14, attacks +5/+6, saves DC 13; medium/hard DMG encounters occasionally; sensible tactics with exploitable mistakes; challenge without cheap punishment.",
+      }
+    : {
+        label: "Medio",
+        directive:
+          "DIFICULTAD Medio (5E): CD habilidad 12-14, ataques +5/+6, salv CD 13; encuentros DMG medio/difícil ocasional; tácticas sensatas con errores aprovechables; reto sin castigo gratuito.",
+      };
 }
 
-function toneGuide(tone: number | undefined): { label: string; directive: string } {
+function toneGuide(tone: number | undefined, locale: AppLocale | undefined): { label: string; directive: string } {
   const t = Math.max(0, Math.min(100, tone ?? 50));
+  const en = normalizeLocale(locale) === "en";
   if (t <= 15) {
-    return {
-      label: "Estricto",
-      directive: "TONO Estricto: reglas Handbook al pie de la letra; prosa sobria; sin humor; tiradas 5E siempre.",
-    };
+    return en
+      ? {
+          label: "Strict",
+          directive:
+            "TONE Strict: Handbook rules to the letter; sober prose; no humor; always use 5E dice where applicable.",
+        }
+      : {
+          label: "Estricto",
+          directive: "TONO Estricto: reglas Handbook al pie de la letra; prosa sobria; sin humor; tiradas 5E siempre.",
+        };
   }
   if (t <= 35) {
-    return {
-      label: "Serio",
-      directive: "TONO Serio: dramático, mecánica estricta, descripciones breves; sin humor gratuito.",
-    };
+    return en
+      ? {
+          label: "Serious",
+          directive: "TONE Serious: dramatic; strict mechanics; concise descriptions; no gratuitous humor.",
+        }
+      : {
+          label: "Serio",
+          directive: "TONO Serio: dramático, mecánica estricta, descripciones breves; sin humor gratuito.",
+        };
   }
   if (t <= 55) {
-    return {
-      label: "Equilibrado",
-      directive: "TONO Equilibrado: épico + reglas estrictas; NPCs con matices; reglas siempre como escritas.",
-    };
+    return en
+      ? {
+          label: "Balanced",
+          directive:
+            "TONE Balanced: epic + strict rules; nuanced NPCs; rules exactly as written when resolving outcomes.",
+        }
+      : {
+          label: "Equilibrado",
+          directive: "TONO Equilibrado: épico + reglas estrictas; NPCs con matices; reglas siempre como escritas.",
+        };
   }
   if (t <= 75) {
-    return {
-      label: "Ocurrente",
-      directive: "TONO Ocurrente: color e ironía ligera; reglas intactas en resolución.",
-    };
+    return en
+      ? {
+          label: "Witty",
+          directive: "TONE Witty: color and light irony; rules remain intact when resolving mechanics.",
+        }
+      : {
+          label: "Ocurrente",
+          directive: "TONO Ocurrente: color e ironía ligera; reglas intactas en resolución.",
+        };
   }
-  return {
-    label: "Bufonesco",
-    directive: "TONO Bufonesco: humor/absurdo amable; reglas justas igualmente aplicadas.",
-  };
+  return en
+    ? {
+        label: "Whimsical",
+        directive: "TONE Whimsical: humor/absurdism (good-natured); rules applied fairly regardless.",
+      }
+    : {
+        label: "Bufonesco",
+        directive: "TONO Bufonesco: humor/absurdo amable; reglas justas igualmente aplicadas.",
+      };
 }
 
-const NARRATIVE_VOICE = `VOZ NARRATIVA (siempre, combate y fuera): <narrativa> es literatura de mesa: inmersión, ritmo, emoción, imagen sensorial, diálogo, apuesta dramática. Involucra al grupo; evita tono de manual, informe o wargame. Mecánica 5E se aplica en silencio vía JSON/tiradas — no vaciar la ficción en listas tácticas.`;
-
-const ENGAGEMENT_DIRECTIVES = `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores si hay varios; sensorial por personaje; cierre con pregunta/dilema abierto; rotar foco respecto al turno anterior; consecuencias tangibles (social, físico, pistas).`;
-
-const TECHNICAL_SCENE_RULE = `INFORMACIÓN TÁCTICA (celdas, rejilla, coordenadas, recuentos de pies de precisión, “tres cuartos de cobertura” como etiqueta, etc.): solo en <acciones>/battle_map o cuando un jugador la solicite de forma explícita (p. ej. botón “escena/terreno” o mensaje pidiendo cómo está colocado el campo). En narración normal, sugiere espacio con lenguaje de ficción: “a un salto de distancia”, “detrás del muro apenas ves sombras”, “el flechazo pasa rozándote” — no exhaustivo ni cartográfico.`;
-
-const COMBAT_HINT = `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
-- combat_tracker: con combat:true incluye combat_tracker{round:1,initiative_index:0,turn_of:"(id del primero que actuará tras iniciativa o quien tenga sorpresa/asalto según PHB)",phase:"initiative",note:"…"} y actualízalo en cada mensaje de combate.
-- INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
-- Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
-- Obstáculos con sentido táctico y narrativo: usa obstacles[].kind descriptivo y consistente (p. ej. wall, tree, bush, rock, water, ice, stream, rubble, door, fence, pillar, wagon, stairs, window, smoke) para que luego puedas narrar muros que tapan, arboles/arbustos que dan cobertura o bloquean vista, corrientes o charcos como terreno difícil, estructuras que limitan movimiento o conjuros.
-- NARRATIVA vs TÉCNICO: en <narrativa> no actúes como visor de tablero: cero enumeración de celdas/casillas/coordenadas/medidas exactas salvo petición explícita del grupo. El JSON + MAPEO TÁCTICO bastan para coherencia; la voz al grupo es historia, no desglose geométrico.
-- Al terminar el encuentro: combat:false, combat_end:true, battle_map omitido o vacío.`;
-
-const COMBAT_DIRECTIVES = `COMBATE 5E (activo) — reglas al pie de la letra (PHB/DMG donde aplique):
-
-RELOJ Y combat_tracker (obligatorio en cada <acciones> con combat:true):
-- Emite siempre combat_tracker{round,initiative_index,turn_of,phase,note?} alineado con la realidad del momento. initiative_index cuenta 0 en el **primero** de la lista INICIATIVA (mayor tirada primero). turn_of = id del combatiente activo (PJ = [id] de JUGADORES; NPC = mismo id que participants[].id).
-- **Ronda 5E (PHB):** todos los combatientes actúan una vez cada uno en orden de iniciativa; al terminar el último de la cola, incrementa round y vuelve initiative_index a 0 (el primero de la cola).
-- **Turno de criatura (PHB):** movimiento, acción, acción adicional si un rasgo la otorga, acción bonus si aplica, interacción con objeto gratuita razonable. El turno **no termina** hasta que hayas resuelto **todas** las piezas mecánicas de ese actor para ese turno: si pediste tirada de ataque y hay impacto o crítico, **en la misma respuesta o en la fase inmediata** pide tirada de daño (dice_requests) y resuelve hp_changes antes de mover initiative_index al siguiente. Si hay varios ataques (Extra Attack, etc.), cada ataque = ataque → (si procede) daño, en secuencia, mismo turno.
-- **Fases phase:** initiative (solo orden); awaiting_dice (salida bloqueada por dados); same_turn_resolution (ya hay resultado de dado y falta aplicar daño/salvación encadenada del **mismo** ataque o efecto); turn_open (el actor puede declarar sin dado obligatorio pendiente); between_actors (solo transición breve; el siguiente turno no “gasta” acciones hasta que declares turn_open con el nuevo turn_of).
-- El botón “continuar historia” del grupo = **siguiente fase mecánica** (p. ej. resolver impacto → pedir daño), **no** “siguiente turno” si phase es awaiting_dice o same_turn_resolution. Prohibido saltar initiative_index mientras el turno del actor actual tenga resoluciones pendientes (ataque sin daño, salvación obligatoria del mismo golpe, etc.).
-- Integración “nombrar ≥2 jugadores”: en awaiting_dice / same_turn_resolution centrada en un actor, los demás solo reacción sensorial breve; **no** invites a otro PJ a gastar su turno 5E si no es su turn_of salvo reacción/regla PHB.
-- Continuidad del mapa: MAPEO TÁCTICO del snapshot + battle_map en JSON es estado canónico. Cada respuesta con combat:true debe traer battle_map alineado con el anterior salvo movimientos, empujes, derribos, conjuros o narración que expliquen el cambio. Prohibido mover fichas ni obstáculos entre turnos sin causa en juego.
-- Obstáculos: conserva x,y,w,h,kind salvo destrucción/creación reglada; si el terreno cambia, actualiza JSON y **narra el momento en prosa** (p. ej. muro que se derrumba), no un parte de geometría.
-- NARRATIVA CINEMATOGRÁFICA (por defecto): cuento de lo que pasa a nivel humano (miedo, esfuerzo, sangre, ruido, relaciones). Sin tutoriales de mapa. Si hace falta claridad espacial, una o dos frases evocativas bastan — no capítulos.
-- Si un jugador pide ver el campo (petición dedicada): entonces SÍ puedes ofrecer descripción de escenario y disposición con más detalle (aún así preferible lenguaje narrativo antes que tabla de coordenadas), sin adelantar tiradas pendientes.
-- TURNOS ENEMIGOS (orden): nombra al enemigo activo y su turno. Si un hostil ataca, dilo explícitamente ("el bandido actúa y te ataca con…") antes del resultado mecánico; tras impacto, indica daño y tipo si aplica (p. ej. "8 cortante"). Si falla, dilo. No mezcles varios enemigos en un solo párrafo sin dejar claro quién pega a quién.
-- Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
-- Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
-- Ataques: d20 + mod + maestría (si competencia) vs CA; crítico natural 20 / pifia 1 en d20 de ataque; daño con tirada aparte. Cobertura, línea de efecto, alcance, visión a oscuras según escena y reglas.
-- Salvaciones de atributo: CD fija del efecto; ventaja/desventaja solo cuando el manual o el estado lo mande.
-- Hechizos: tiempo de lanzamiento, componentes, slots, concentración (un solo conjuro concentrado a la vez), interrupciones que dañan — todo explícito.
-- hp_changes y battle_map.participants[].hp coherentes; status_effects y participants[].status coherentes.
-- 0 HP: inconsciente; salvaciones de muerte al inicio de cada turno en 0 HP (1d20, 10+ éxito); reflejar en mapa hasta resuelto.
-
-- Mapeo geométrico detallado (celdas, LoS como lista, cobertura fina): solo petición explícita del jugador o datos en JSON; proscrito rellenar la narrativa con jerga de wargame o medidas finas salvo que alguien las pida.`;
-
-const MECHANICAL_DIRECTIVES = `FUERA DE COMBATE: tirada+CD si hay incertidumbre; ventaja/desventaja en dice_requests como 2d20kh1 / 2d20kl1; descansos corto/largo; recompensas xp_awards, items_add, items_remove.`;
-
-/** Autoridad de ficha: el jugador puede proponer lo que quiera; la mecánica solo corre si encaja con lista + PHB. */
-const SHEET_AUTHORITY_LOCKS = `CANDADOS DE FICHA (ley del juego):
-- Bajo cada jugador [id], lo listado (equipo, conjuros, slots, competencias armaduras/armas/herramientas/idiomas) es la verdad del personaje. No inventes conjuros, armas empuñadas, ni herramientas que no estén ahí salvo reglas explícitas del Handbook (p. ej. objeto improvisado) y coherencia con el equipo.
-- Si declaran un conjuro o truco que no aparece en su lista, o un nivel de slot que no tienen libre, o una herramienta sin competencia listada: la acción no procede a mecánica — narra el rechazo (olvido, gesto incompleto, falta de componentes, etc.); no pidas dados para ese efecto; no uses spell_slots, hp_changes ni ventaja por competencia por ese intento.
-- Ataques: el arma debe ser coherente con "equipo" y, si aplica 5E, con competencias de armas (simples/marciales, etc.); sin competencia no regales el uso competente del arma.
-- Si el nombre es ambiguo respecto a la lista, pide una aclaración corta antes de tirar.
-- La creatividad del jugador se acoge siempre que no contradiga ficha ni fragmentos [R#]/[A#] del Handbook/módulo.`;
-
-const RESOLUTION_DIRECTIVE = `TIRADAS ANTES DEL RESULTADO (inviolable):
-- Si el éxito no es obvio (ataque, conjuro, habilidad, salvación, iniciativa, etc.), PARA la narración antes del desenlace y emite dice_requests por player_id (cada entrada con "id" estable único en camel/snake no importa, pero reutiliza el mismo id si repites la misma petición). No uses "all" salvo que todos tiren exactamente lo mismo.
-- Ataque PHB: primero tirada de ataque; si impacta o es crítico, **tirada de daño del mismo ataque** antes de avanzar initiative_index / turn_of al siguiente combatiente. Si pides ataque y aún no hay daño resuelto, combat_tracker.phase debe ser awaiting_dice o same_turn_resolution y note debe decir explícitamente qué falta (p. ej. "daño del golpe").
-- Mientras haya tiradas pendientes listadas en EVENTOS RECIENTES (pendiente de dados) o hayas emitido dice_requests en ESTE turno sin tener aún los resultados reales del jugador, NO adelantes la trama, NO narras desenlace del intento, NO pasas turno narrativo a otro foco salvo puras percepciones que no dependan de ese resultado. Limítate a: pedir dados, aclarar duda breve, o revocar peticiones invalidadas.
-- Si algo invalida una tirada ya pedida (acción imposible, objetivo muerto, ventana cerrada), lista esos ids en dice_revoke en <acciones> para que la interfaz las retire; no sigas esperando ese dado.
-- Si no hay tirada necesaria, dilo en una frase y resuelve. Si la acción es imposible por ficha (CANDADOS DE FICHA), no es "incertidumbre": niega sin tirada y no pidas dados.`;
-
-const FORMAT = `SALIDA (español): solo dos bloques.
-
-<narrativa>
-[emocion:epica|suspenso|calmo|urgente|misterio]
-3-6 párrafos de ficción reactiva (voz en persona/presente que engancha); [sfx:…] opcional. Sin tono técnico ni desglose de tablero salvo petición explícita del grupo. Cierra invitando a actuar.
-</narrativa>
-
-<acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (obligatorio si combat:true; ver COMBATE activo), initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
-player_id en tiradas: id de JUGADORES, "all", o "npc:…". En dice_requests.expression usa NdM con modificadores numéricos (1d20+5) o, si quieres que la app los resuelva sola, sumandos PB y atributos en MAYÚSCULAS: FUE DES CON INT SAB CAR (p. ej. 1d20+INT+PB). Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
-</acciones>
-
-Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.
-
-El chat del grupo solo muestra lo de <narrativa>; <acciones> es solo para la app/DM (nunca lo leas en voz alta al grupo).`;
-
-const ADVENTURE_DIRECTIVE = `MÓDULO PDF = canon de ficción: ubicaciones, NPCs, encuentros y botín como en el texto; improvisar solo huecos coherentes; no contradecir hechos; fragmentos [A#] prevalecen; 5E gobierna mecánica, el módulo la trama.`;
-
 function renderAdventureBlock(snap: SessionSnapshot, caps: DmRagRenderCaps): string {
+  const L = getDmLocaleBlocks(snap.locale);
   const hasOutline = Boolean(snap.adventureOutline && snap.adventureOutline.trim());
   const hasChunks = Boolean(snap.adventureChunks && snap.adventureChunks.length);
   if (!hasOutline && !hasChunks) return "";
 
-  const header = `AVENTURA${snap.adventureSourceName ? ` (${snap.adventureSourceName})` : ""}`;
-  const outline = hasOutline ? `\nESQUEMA:\n${snap.adventureOutline!.trim()}` : "";
-  const chunks = hasChunks ? `\nFRAGMENTOS [A#]:\n${renderAdventureChunksForPrompt(snap.adventureChunks, caps)}` : "";
-  return `${header}${outline}${chunks}\n${ADVENTURE_DIRECTIVE}`;
+  const header = `${L.adventureTitle}${snap.adventureSourceName ? ` (${snap.adventureSourceName})` : ""}`;
+  const outline = hasOutline ? `\n${L.outlineLabel}\n${snap.adventureOutline!.trim()}` : "";
+  const chunks = hasChunks ? `\n${L.fragmentsLabel}\n${renderAdventureChunksForPrompt(snap.adventureChunks, caps, snap.locale)}` : "";
+  return `${header}${outline}${chunks}\n${L.adventureDirective}`;
 }
 
 function sharedDirectiveTail(snap: SessionSnapshot, includeEngagement: boolean): string {
-  const combatBlock = isCombatWorkflow(snap) ? COMBAT_DIRECTIVES : COMBAT_HINT;
-  const parts: string[] = [NARRATIVE_VOICE, TECHNICAL_SCENE_RULE];
-  if (includeEngagement) parts.push(ENGAGEMENT_DIRECTIVES);
-  parts.push(combatBlock, MECHANICAL_DIRECTIVES, SHEET_AUTHORITY_LOCKS, RESOLUTION_DIRECTIVE, FORMAT);
+  const L = getDmLocaleBlocks(snap.locale);
+  const combatBlock = isCombatWorkflow(snap) ? L.combatDirectives : L.combatHint;
+  const parts: string[] = [L.narrativeVoice, L.technicalSceneRule];
+  if (includeEngagement) parts.push(L.engagementDirectives);
+  parts.push(combatBlock, L.mechanicalDirectives, L.sheetAuthorityLocks, L.resolutionDirective, L.formatBlock);
   return parts.join("\n\n");
 }
 
@@ -454,27 +462,28 @@ function baseSystem(
   toneLine: string,
   ragCaps: DmRagRenderCaps
 ): string {
+  const L = getDmLocaleBlocks(snap.locale);
   const init = renderInitiative(snap);
   const mapBlock = renderBattleMapSummary(snap);
-  const diff = difficultyGuide(snap.difficulty);
-  const diffLine = `${diff.directive}\n(Dificultad: ${diff.label})`;
+  const diff = difficultyGuide(snap.difficulty, snap.locale);
+  const diffLine = `${diff.directive}\n(${L.difficultyWord} ${diff.label})`;
   const adventureBlock = renderAdventureBlock(snap, ragCaps);
-  return `Eres un Dungeon Master experto de D&D 5E: historia memorable, justa y clara. Separación estricta: la voz al grupo es ficción que engancha; la precisión de tablero vive en <acciones>/JSON o al pedirla el jugador.
+  return `${L.playersIntro}
 
-HISTORIA: ${snap.storyTitle}
-MODO: ${snap.mode === "auto" ? "Automático (diriges todo)" : "Asistente del DM humano"}
-TURNO: ${snap.turn}${snap.seed ? `\nSEMILLA: ${snap.seed}` : ""}${snap.summary ? `\nRESUMEN: ${snap.summary}` : ""}
+${L.storyLabel} ${snap.storyTitle}
+${L.modePrefix} ${snap.mode === "auto" ? L.modeAuto : L.modeAssistant}
+${L.turnLabel} ${snap.turn}${snap.seed ? `\n${L.seedLabel} ${snap.seed}` : ""}${snap.summary ? `\n${L.summaryLabel} ${snap.summary}` : ""}
 
-JUGADORES:
-${renderPlayers(snap.players)}
+${L.playersHeading}
+${renderPlayers(snap.players, snap.locale)}
 ${init ? "\n" + init : ""}
 ${mapBlock ? "\n" + mapBlock : ""}
 ${renderCombatTracker(snap) ? "\n" + renderCombatTracker(snap) : ""}
 
-${snap.recentLog?.length ? `EVENTOS RECIENTES:\n${snap.recentLog.slice(-8).join("\n")}` : ""}
+${snap.recentLog?.length ? `${L.recentEvents}\n${snap.recentLog.slice(-8).join("\n")}` : ""}
 ${adventureBlock ? "\n" + adventureBlock + "\n" : ""}
-HANDBOOK (mecánica):
-${renderRulesContextForPrompt(rulesContext, ragCaps)}
+${L.handbookMechanics}
+${renderRulesContextForPrompt(rulesContext, ragCaps, snap.locale)}
 
 ${toneLine}
 
@@ -484,29 +493,30 @@ ${sharedDirectiveTail(snap, true)}`;
 }
 
 function assistantSystem(snap: SessionSnapshot, rulesContext: RetrievedChunk[], toneLine: string, ragCaps: DmRagRenderCaps): string {
-  const diff = difficultyGuide(snap.difficulty);
+  const L = getDmLocaleBlocks(snap.locale);
+  const diff = difficultyGuide(snap.difficulty, snap.locale);
   const adventureBlock = renderAdventureBlock(snap, ragCaps);
-  return `Asistente técnico del DM humano (D&D 5E). Sin narrar al grupo: respuestas breves, reglas, CDs, iniciativa, estado. Formato obligatorio abajo.
+  return `${L.assistantIntro}
 
-HISTORIA: ${snap.storyTitle}
-TURNO: ${snap.turn}${snap.summary ? `\nCONTEXTO: ${snap.summary}` : ""}
+${L.storyLabel} ${snap.storyTitle}
+${L.turnLabel} ${snap.turn}${snap.summary ? `\n${L.ctxLabel} ${snap.summary}` : ""}
 
-JUGADORES:
-${renderPlayers(snap.players)}
+${L.playersHeading}
+${renderPlayers(snap.players, snap.locale)}
 ${renderInitiative(snap) ? "\n" + renderInitiative(snap) : ""}
 ${renderBattleMapSummary(snap) ? "\n" + renderBattleMapSummary(snap) : ""}
 ${renderCombatTracker(snap) ? "\n" + renderCombatTracker(snap) : ""}
 
-${adventureBlock ? adventureBlock + "\n\n" : ""}HANDBOOK:
-${renderRulesContextForPrompt(rulesContext, ragCaps)}
+${adventureBlock ? adventureBlock + "\n\n" : ""}${L.handbookAssistant}
+${renderRulesContextForPrompt(rulesContext, ragCaps, snap.locale)}
 
 ${toneLine}
 
-${diff.directive}\n(Dificultad: ${diff.label})
+${diff.directive}\n(${L.difficultyWord} ${diff.label})
 
 ${sharedDirectiveTail(snap, false)}
 
-En <narrativa>: nota corta para el DM (no leer al grupo). En <acciones>: dice_requests, iniciativa, etc. según proceda.`;
+${L.assistantNarrativeHint}`;
 }
 
 export function buildOpeningPrompt(
@@ -515,21 +525,26 @@ export function buildOpeningPrompt(
   ragCaps: Partial<DmRagRenderCaps> = {}
 ) {
   const caps = mergeRagCaps(ragCaps);
-  const { label, directive } = toneGuide(snap.tone);
-  const system = baseSystem(snap, rulesContext, `${directive}\n(Tono: ${label}, ${snap.tone ?? 50}/100)`, caps);
+  const L = getDmLocaleBlocks(snap.locale);
+  const { label, directive } = toneGuide(snap.tone, snap.locale);
+  const system = baseSystem(
+    snap,
+    rulesContext,
+    `${directive}\n(${L.toneWord}: ${label}, ${snap.tone ?? 50}/100)`,
+    caps,
+  );
 
   const names = snap.players.map((p) => `${p.name} (${p.race} ${p.class})`).join(", ");
+  const filler = names || L.fillerParty;
   const hasModule = Boolean(
     (snap.adventureOutline && snap.adventureOutline.trim()) ||
       (snap.adventureChunks && snap.adventureChunks.length)
   );
   const moduleDirective = hasModule
-    ? `\n\nMÓDULO CARGADO: abre donde el módulo empieza (esquema + [A#]); respeta nombres y hechos; integra a (${names || "aventureros"}); no adelantes revelaciones posteriores.`
-    : `\n\nSi hay SEMILLA, respétala; si es vaga, premisa coherente con PJ y tono.`;
+    ? L.moduleLoaded.replace("{{names}}", filler)
+    : L.moduleSeed;
 
-  const user = `Inicia la historia AHORA (apertura cinematográfica, formato narrativa+acciones).
-
-Orden: (1) dónde/cuándo/sensorial (2) quiénes por nombre (${names || "aventureros"}) (3) por qué están juntos (4) gancho/conflicto (5) invitación concreta a ≥2 jugadores.${moduleDirective}`;
+  const user = `${L.openingUser.replace("{{names}}", filler)}${moduleDirective}`;
 
   return [
     { role: "system" as const, content: system },
@@ -544,8 +559,14 @@ export function buildAutoDmPrompt(
   ragCaps: Partial<DmRagRenderCaps> = {}
 ) {
   const caps = mergeRagCaps(ragCaps);
-  const { label, directive } = toneGuide(snap.tone);
-  const system = baseSystem(snap, rulesContext, `${directive}\n(Tono: ${label}, ${snap.tone ?? 50}/100)`, caps);
+  const L = getDmLocaleBlocks(snap.locale);
+  const { label, directive } = toneGuide(snap.tone, snap.locale);
+  const system = baseSystem(
+    snap,
+    rulesContext,
+    `${directive}\n(${L.toneWord}: ${label}, ${snap.tone ?? 50}/100)`,
+    caps,
+  );
 
   let user = "";
   if (action.kind === "opening") {
@@ -554,27 +575,13 @@ export function buildAutoDmPrompt(
   if (action.kind === "continue") {
     const combatClock =
       snap.combat || snap.initiative?.length
-        ? `
-- COMBATE / “Continuar historia”: esto NO es “pasar al siguiente turno de iniciativa” por defecto. Es **avanzar la siguiente fase mecánica** del RELOJ DE COMBATE / combat_tracker: si quedaba daño u otra tirada del **mismo** ataque o del **mismo** turn_of, pédela o resuélvela ahora; actualiza phase (awaiting_dice / same_turn_resolution / turn_open / between_actors) y note. Solo incrementa initiative_index y cambia turn_of cuando el turno 5E del actor actual esté **cerrado** (sin dados obligatorios pendientes de ese turno).
-- Si RELOJ DE COMBATE aparece arriba, sincroniza combat_tracker con él salvo que las tiradas en Señales o EVENTOS RECIENTES obliguen a corregir.`
+        ? L.continueCombatClock
         : "";
-    user = `Continúa desde el último momento narrativo.
-- Una frase resume lo que plantearon los jugadores (si hubo mensajes).
-- TIRADAS (crítico): en el bloque "Señales recientes" pueden aparecer líneas que empiezan con 🎲 o "Tirada:" — son resultados **ya obtenidos** del jugador en la crónica. Debes resolver ese desenlace mecánico y narrativo ahora; **no vuelvas a pedir la misma tirada** ni repitas el mismo bloque de petición de dados si ya hay resultado explícito aquí abajo. Si algo invalidó la tirada, usa dice_revoke.
-- Si EVENTOS RECIENTES (arriba en el system) mencionan "Pendiente tirada" sin resultado en Señales, sigue esperando dados o revoca.
-- Avanza escena: consecuencias, nuevo estímulo o cierre de subescena; en combate, respeta INICIATIVA, battle_map y combat_tracker en JSON; narrativa cinematográfica salvo petición de escena.
-- Invita a actuar rotando foco (fuera de combate o en turn_open del actor que le toca).${combatClock}${action.recentSignals?.length ? `\nSeñales recientes (incluye tiradas resueltas):\n- ${action.recentSignals.join("\n- ")}` : ""}`;
+    user = `${L.continueUserIntro}${combatClock}${action.recentSignals?.length ? `\n${L.recentSignals}\n- ${action.recentSignals.join("\n- ")}` : ""}`;
   } else if (action.sceneInfoRequest) {
-    user = `Jugador ${action.playerName} solicita INFORMACIÓN DE ESCENA Y CAMPO (combate).
-Responde en <narrativa> SOLO con:
-- Descripción sensorial del entorno (luz, olor, sonido, temperatura, tensión).
-- Descripción táctica clara del campo: disposición aproximada, distancias útiles, obstáculos, cobertura, línea de visión, terreno difícil — usando MAPEO TÁCTICO/battle_map como referencia fiel.
-No avances el combate ni inventes acciones nuevas de enemigos ni resultados de ataque en este mensaje salvo que EVENTOS RECIENTES exijan resolver algo ineludible. Mantén <acciones> mínimas (p. ej. battle_map alineado si hace falta); no pidas dados salvo que falte información mecánica imprescindible.`;
+    user = L.sceneInfoUser.replace(/\{\{player\}\}/g, action.playerName);
   } else {
-    user = `Jugador ${action.playerName}: ${action.text}
-
-Flujo: (1) quiénes se afectan (2) si hay incertidumbre, PARA antes del resultado, dice_requests por player_id con id estable por petición (3) no narres éxito/fracaso hasta el turno en que existan resultados (4) si no hay tirada, explica y resuelve.
-CD y tipo explícitos. Sensorial breve para ${action.playerName} sin adelantar desenlace de tiradas pendientes.`;
+    user = L.playerTurnUser.replace(/\{\{player\}\}/g, action.playerName).replace("{{text}}", action.text ?? "");
   }
 
   return [
@@ -590,12 +597,18 @@ export function buildAssistantDmPrompt(
   ragCaps: Partial<DmRagRenderCaps> = {}
 ) {
   const caps = mergeRagCaps(ragCaps);
-  const { label, directive } = toneGuide(snap.tone);
-  const system = assistantSystem(snap, rulesContext, `${directive}\n(Tono: ${label}, ${snap.tone ?? 50}/100)`, caps);
+  const L = getDmLocaleBlocks(snap.locale);
+  const { label, directive } = toneGuide(snap.tone, snap.locale);
+  const system = assistantSystem(
+    snap,
+    rulesContext,
+    `${directive}\n(${L.toneWord}: ${label}, ${snap.tone ?? 50}/100)`,
+    caps,
+  );
 
   return [
     { role: "system" as const, content: system },
-    { role: "user" as const, content: `DM: ${dmMessage}` },
+    { role: "user" as const, content: `${L.assistantDmPrefix} ${dmMessage}` },
   ];
 }
 

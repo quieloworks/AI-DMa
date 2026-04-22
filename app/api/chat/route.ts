@@ -17,17 +17,23 @@ import { retrieveAdventure, getAdventureOutline, hasAdventure } from "@/server/a
 import { applyDmActions } from "@/server/dm/apply-actions";
 import { getDmRagBudget } from "@/server/dm/prompt-budget";
 import { getIo } from "@/server/io-bus";
+import type { AppLocale } from "@/lib/i18n/locale";
+import { getGlobalSettings } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/t";
 
 export const runtime = "nodejs";
 
-function llmErrorMessage(err: unknown): string {
+function llmErrorMessage(err: unknown, locale: AppLocale): string {
   const e = err as Error & { cause?: NodeJS.ErrnoException & { address?: string; port?: number } };
   const c = e?.cause;
   if (c && typeof c === "object" && "code" in c && c.code === "ECONNREFUSED") {
     if (c.port === 11434) {
-      return "Ollama no está en marcha (puerto 11434 rechazado). Arranca Ollama o define OLLAMA_HOST si usa otro host/puerto.";
+      return t(locale, "errors.llmOllama");
     }
-    return `Conexión rechazada a ${c.address ?? "servidor"}:${c.port ?? "?"}. Comprueba que el proveedor de chat local esté activo.`;
+    return t(locale, "errors.llmConn", {
+      host: String(c.address ?? "server"),
+      port: String(c.port ?? "?"),
+    });
   }
   return e?.message ?? String(err);
 }
@@ -49,13 +55,14 @@ type ChatReq = {
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as ChatReq;
   const db = getDb();
+  const locale = getGlobalSettings().locale;
 
   const sessionRow = db
     .prepare<string, { id: string; story_id: string; state_json: string; turn: number }>(
       "SELECT id, story_id, state_json, turn FROM session WHERE id = ?"
     )
     .get(body.sessionId);
-  if (!sessionRow) return new Response("Sesión no existe", { status: 404 });
+  if (!sessionRow) return new Response(t(locale, "errors.sessionNotFound"), { status: 404 });
 
   const storyRow = db
     .prepare<string, { title: string; summary: string | null; data_json: string; source_pdf: string | null }>(
@@ -135,7 +142,7 @@ export async function POST(req: NextRequest) {
     const snapStatuses = (state.players?.find((p2) => p2.id === p.player_id)?.statusEffects ?? []) as string[];
     return {
       id: p.player_id,
-      name: ch?.name ?? "Aventurero",
+      name: ch?.name ?? t(locale, "defaults.adventurer"),
       class: ch?.class ?? "",
       race: ch?.race ?? "",
       level: ch?.level ?? 1,
@@ -158,7 +165,7 @@ export async function POST(req: NextRequest) {
   const adventureOutline = adventureLoaded ? getAdventureOutline(storyId) : null;
 
   const snap: SessionSnapshot = {
-    storyTitle: storyRow?.title ?? "Aventura",
+    storyTitle: storyRow?.title ?? (locale === "en" ? "Adventure" : "Aventura"),
     mode: body.mode,
     turn: sessionRow.turn,
     summary: state.summary ?? storyRow?.summary ?? undefined,
@@ -174,6 +181,7 @@ export async function POST(req: NextRequest) {
     combat: state.combat === true,
     battleMap: state.battleMap ?? null,
     combatTracker: state.combatTracker ?? null,
+    locale,
   };
 
   const ragBudget = getDmRagBudget();
@@ -208,7 +216,7 @@ export async function POST(req: NextRequest) {
   } else {
     turnAction = {
       kind: "player",
-      playerName: body.playerName ?? "Jugador",
+      playerName: body.playerName ?? t(locale, "errors.playerDefault"),
       text: body.text ?? "",
       sceneInfoRequest: body.sceneInfoRequest === true,
     };
@@ -256,7 +264,7 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(tok));
         }
       } catch (err) {
-        controller.enqueue(encoder.encode(`\n[error] ${llmErrorMessage(err)}`));
+        controller.enqueue(encoder.encode(`\n[error] ${llmErrorMessage(err, locale)}`));
       } finally {
         try {
           const parsed = parseDmResponse(fullText);
@@ -280,7 +288,7 @@ export async function POST(req: NextRequest) {
           const prevLog = nextState.recentLog ?? [];
           const logEntry =
             action === "player"
-              ? `T${sessionRow.turn + 1} · ${body.playerName ?? "Jugador"}: ${(body.text ?? "").slice(0, 120)} → DM: ${(summaryUpdate ?? parsed.narrative.slice(0, 120)).trim()}`
+              ? `T${sessionRow.turn + 1} · ${body.playerName ?? t(locale, "errors.playerDefault")}: ${(body.text ?? "").slice(0, 120)} → DM: ${(summaryUpdate ?? parsed.narrative.slice(0, 120)).trim()}`
               : `T${sessionRow.turn + 1} · DM: ${(summaryUpdate ?? parsed.narrative.slice(0, 120)).trim()}`;
           const extraLog: string[] = [];
           const rawDiceReq = actObj.dice_requests;

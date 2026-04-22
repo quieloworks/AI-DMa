@@ -45,6 +45,7 @@ import {
 } from "@/lib/character";
 import { SPELLS, spellsForClassAtLevel, spellsForClassUpToLevel, type Spell, type SpellClassId } from "@/lib/spells";
 import { FEATS, type Feat } from "@/lib/feats";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type Step =
   | "race"
@@ -59,20 +60,6 @@ type Step =
   | "equipo"
   | "review";
 
-const STEPS: { id: Step; label: string }[] = [
-  { id: "race", label: "Raza" },
-  { id: "class", label: "Clase" },
-  { id: "background", label: "Trasfondo" },
-  { id: "abilities", label: "Atributos" },
-  { id: "feats", label: "Mejoras" },
-  { id: "skills", label: "Habilidades" },
-  { id: "spells", label: "Conjuros" },
-  { id: "details", label: "Detalles" },
-  { id: "estilo", label: "Estilo de combate" },
-  { id: "equipo", label: "Equipo" },
-  { id: "review", label: "Revisión" },
-];
-
 type AbilityMethod = "standard" | "pointbuy" | "roll";
 type MoneyMethod = "fixed" | "rolled";
 
@@ -85,6 +72,23 @@ export type AsiChoice = AsiSlotChoice | { kind: "none" };
 
 export function CharacterWizard() {
   const router = useRouter();
+  const tr = useTranslations();
+  const STEPS = useMemo(() => {
+    const meta: [Step, string][] = [
+      ["race", "wizard.step.race"],
+      ["class", "wizard.step.class"],
+      ["background", "wizard.step.background"],
+      ["abilities", "wizard.step.abilities"],
+      ["feats", "wizard.step.feats"],
+      ["skills", "wizard.step.skills"],
+      ["spells", "wizard.step.spells"],
+      ["details", "wizard.step.details"],
+      ["estilo", "wizard.step.fightingStyle"],
+      ["equipo", "wizard.step.equipment"],
+      ["review", "wizard.step.review"],
+    ];
+    return meta.map(([id, key]) => ({ id, label: tr(key) }));
+  }, [tr]);
   const [step, setStep] = useState<Step>("race");
   const [race, setRace] = useState<RaceBasics | null>(null);
   const [variantId, setVariantId] = useState<string>("");
@@ -807,20 +811,20 @@ export function CharacterWizard() {
 
           <div className="mt-10 flex items-center justify-between">
             <button className="btn-ghost" disabled={stepIdx === 0} onClick={goPrev}>
-              ← Anterior
+              {tr("wizard.prev")}
             </button>
             {step !== "review" ? (
               <button
                 className="btn-accent"
                 disabled={nextDisabled}
                 onClick={goNext}
-                title={nextDisabled ? "Completa este paso para continuar" : undefined}
+                title={nextDisabled ? tr("wizard.nextBlockedTitle") : undefined}
               >
-                Siguiente →
+                {tr("wizard.next")}
               </button>
             ) : (
               <button className="btn-accent" disabled={saving || !name || !race || !klass || !background} onClick={save}>
-                {saving ? "Guardando…" : "Guardar personaje"}
+                {saving ? tr("wizard.saving") : tr("wizard.saveCharacter")}
               </button>
             )}
           </div>
@@ -828,29 +832,30 @@ export function CharacterWizard() {
 
         <aside className="relative">
           <div className="sticky top-24 card">
-            <p className="label mb-2">Resumen</p>
+            <p className="label mb-2">{tr("wizard.summaryTitle")}</p>
             <dl className="grid grid-cols-2 gap-y-2 text-sm">
-              <dt style={{ color: "var(--color-text-hint)" }}>Nombre</dt>
-              <dd>{name || "—"}</dd>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.name")}</dt>
+              <dd>{name || tr("common.empty")}</dd>
               {playerName && (
                 <>
-                  <dt style={{ color: "var(--color-text-hint)" }}>Jugador</dt>
+                  <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.player")}</dt>
                   <dd>{playerName}</dd>
                 </>
               )}
-              <dt style={{ color: "var(--color-text-hint)" }}>Raza</dt>
-              <dd>{race?.label ?? "—"}{variant ? ` · ${variant.label}` : ""}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>Clase</dt>
-              <dd>{klass?.label ?? "—"}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>Trasfondo</dt>
-              <dd>{background?.label ?? "—"}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>Nivel</dt>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.race")}</dt>
+              <dd>{race?.label ?? tr("common.empty")}
+                {variant ? ` · ${variant.label}` : ""}</dd>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.class")}</dt>
+              <dd>{klass?.label ?? tr("common.empty")}</dd>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.background")}</dt>
+              <dd>{background?.label ?? tr("common.empty")}</dd>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.level")}</dt>
               <dd>{level}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>HP máx.</dt>
-              <dd>{maxHp || "—"}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>CA</dt>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.maxHp")}</dt>
+              <dd>{maxHp || tr("common.empty")}</dd>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.ac")}</dt>
               <dd>{ac}</dd>
-              <dt style={{ color: "var(--color-text-hint)" }}>Comp.</dt>
+              <dt style={{ color: "var(--color-text-hint)" }}>{tr("wizard.summary.prof")}</dt>
               <dd>+{prof}</dd>
             </dl>
             <div className="my-4 divider" />
@@ -928,6 +933,7 @@ function RaceStep({
   customAbilityPicks: Ability[];
   setCustomAbilityPicks: (a: Ability[]) => void;
 }) {
+  const tr = useTranslations();
   const toggleHalfElf = (a: Ability) => {
     if (a === "car") return;
     const next = new Set(halfElfBonus);
@@ -956,7 +962,7 @@ function RaceStep({
           <button key={r.id} onClick={() => onPick(r)} className={r.id === race?.id ? "card-accent text-left" : "card text-left"}>
             <h3 className="mb-1">{r.label}</h3>
             <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-              Vel. {r.speed} ·{" "}
+              {tr("wizard.race.speed")} {r.speed} ·{" "}
               {Object.entries(r.abilityBonus)
                 .map(([k, v]) => `${k.toUpperCase()} +${v}`)
                 .join(", ")}
@@ -966,7 +972,10 @@ function RaceStep({
             </p>
             {r.variants && r.variants.length > 0 && (
               <p className="mt-2 text-xs" style={{ color: "var(--color-accent)" }}>
-                {r.variants.length} {r.variantLabel?.toLowerCase() ?? "variantes"} disponibles
+                {tr("wizard.race.variantsAvailable", {
+                  n: r.variants.length,
+                  kind: r.variantLabel?.toLowerCase() ?? tr("wizard.race.variantKind"),
+                })}
               </p>
             )}
           </button>
@@ -975,9 +984,13 @@ function RaceStep({
       {race?.variants && race.variants.length > 0 && (
         <div className="mt-5 card">
           <div className="mb-3 flex items-center justify-between">
-            <p className="label">{race.variantLabel ?? "Subraza"}: elige una</p>
+            <p className="label">
+              {tr("wizard.race.pickSubrace", {
+                label: race.variantLabel ?? tr("wizard.race.subraceDefault"),
+              })}
+            </p>
             <span className="badge" style={{ color: variantId ? "var(--color-accent)" : undefined }}>
-              {variantId ? "seleccionada" : "pendiente"}
+              {variantId ? tr("wizard.race.selected") : tr("wizard.race.pending")}
             </span>
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -1002,8 +1015,8 @@ function RaceStep({
                   {bonus && (
                     <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
                       {bonus}
-                      {v.speedOverride ? ` · Vel. ${v.speedOverride}` : ""}
-                      {v.hpBonusPerLevel ? ` · +${v.hpBonusPerLevel} PG/nivel` : ""}
+                      {v.speedOverride ? ` · ${tr("wizard.race.speed")} ${v.speedOverride}` : ""}
+                      {v.hpBonusPerLevel ? ` · ${tr("wizard.race.hpPerLevel", { n: v.hpBonusPerLevel })}` : ""}
                     </p>
                   )}
                   {v.traits && v.traits.length > 0 && (
@@ -1020,7 +1033,7 @@ function RaceStep({
       {race?.id === "semielfo" && (
         <div className="mt-5 card">
           <div className="mb-3 flex items-center justify-between">
-            <p className="label">Versatilidad semielfa: elige +1 a dos atributos (distintos de Carisma)</p>
+            <p className="label">{tr("wizard.race.halfElfTitle")}</p>
             <span className="badge" style={{ color: halfElfBonus.length === 2 ? "var(--color-accent)" : undefined }}>
               {halfElfBonus.length}/2
             </span>
@@ -1047,7 +1060,12 @@ function RaceStep({
         <div className="mt-5 card">
           <div className="mb-3 flex items-center justify-between">
             <p className="label">
-              Elige {customAbilityRule.count} atributo{customAbilityRule.count === 1 ? "" : "s"} distinto{customAbilityRule.count === 1 ? "" : "s"} para aplicar +{customAbilityRule.value}
+              {tr("wizard.race.pickNAttributes", {
+                count: customAbilityRule.count,
+                pluralS: customAbilityRule.count === 1 ? "" : "s",
+                pluralS2: customAbilityRule.count === 1 ? "" : "s",
+                value: customAbilityRule.value,
+              })}
             </p>
             <span className="badge" style={{ color: customAbilityPicks.length === customAbilityRule.count ? "var(--color-accent)" : undefined }}>
               {customAbilityPicks.length}/{customAbilityRule.count}

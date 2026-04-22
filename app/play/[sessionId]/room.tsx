@@ -6,6 +6,7 @@ import {
   canResolveDmDiceExpression,
   resolveDmDiceExpression,
 } from "@/lib/dm-dice-expression";
+import { useTranslations } from "@/components/LocaleProvider";
 
 type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
 
@@ -70,6 +71,13 @@ const SKILL_ABILITY: Record<string, Ability> = {
   supervivencia: "sab",
 };
 
+/** Match weapon-like gear by Spanish or English names (equipment may be either language). */
+const WEAPON_NAME_PATTERN =
+  /espada|hacha|arco|daga|maza|lanza|martillo|ballesta|bast(ó|o)n|jabalina|cimitarra|garrote|rapiera|honda|sword|axe|bows?|dagger|mace|spear|hammers?|crossbows?|staff|quarterstaff|javelin|scimitar|clubs?|rapier|sling|wands?|battleaxe|greatsword|longbow|shortbow|handaxe|greataxe|longsword|shortsword|tridents?|whips?|flails?|morningstars?|darts?|warhammer|greatclub|halberds?|glaives?|pikes?|lances?|nets?\b|shields?|sickles?|mauls?|picks?|blowguns?|yklwas?|hand\s*crossbow|light\s*crossbow|heavy\s*crossbow/i;
+
+const CONSUMABLE_NAME_PATTERN =
+  /poci(ó|o)n|antorcha|tienda|raci(ó|o)n|cuerda|ganz(ú|u)a|potion|torch|tent|tents?|rations?|ropes?|crowbars?|acids?|oils?|poisons?|antitoxin|alchemist|burglar|flasks?|vials?|kits?|gear|supplies/i;
+
 function abilityMod(score: number): number {
   return Math.floor((score - 10) / 2);
 }
@@ -109,6 +117,7 @@ export function PlayRoom({
   initialToken?: string;
   initialCombat?: boolean;
 }) {
+  const tr = useTranslations();
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2) + Date.now().toString(36));
   const socketRef = useRef<Socket | null>(null);
   const rollCtxRef = useRef({
@@ -230,7 +239,7 @@ export function PlayRoom({
             const dc = cur.dc;
             const passed = typeof dc !== "number" || evt.result.total >= dc;
             if (!passed) {
-              flashToast(`Total ${evt.result.total} · CD ${dc} — no supera; vuelve a tirar con el botón inferior`);
+              flashToast(tr("play.diceDcFailToast", { total: evt.result.total, dc }));
               return prev;
             }
             const next = prev.filter((r) => r.id !== evt.requestId);
@@ -250,7 +259,7 @@ export function PlayRoom({
                   by: {
                     role: "player",
                     playerId: c2.playerId,
-                    label: h2.label ?? "Solicitado por el DM",
+                    label: h2.label ?? tr("play.diceDmRequested"),
                   },
                   expression: expr,
                   requestId: h2.id,
@@ -266,7 +275,7 @@ export function PlayRoom({
     );
 
     s.on("dice:error", (evt: { message?: string }) => {
-      flashToast(evt.message ?? "Tirada inválida");
+      flashToast(evt.message ?? tr("play.diceInvalidRoll"));
     });
 
     s.on("dice:revoke", (evt: { sessionId: string; requestIds: string[] }) => {
@@ -304,7 +313,7 @@ export function PlayRoom({
       socketRef.current = null;
       s.disconnect();
     };
-  }, [picked, sessionId, flashToast]);
+  }, [picked, sessionId, flashToast, tr]);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -324,13 +333,13 @@ export function PlayRoom({
             mode: "auto",
             action: "player",
             playerId: picked.player_id,
-            playerName: picked.character?.name ?? "Jugador",
+            playerName: picked.character?.name ?? tr("errors.playerDefault"),
             text,
             sceneInfoRequest: opts?.sceneInfoRequest === true,
             clientId: clientIdRef.current,
           }),
         });
-        if (!res.body) throw new Error("sin stream");
+        if (!res.body) throw new Error(tr("play.streamError"));
         const reader = res.body.getReader();
         while (true) {
           const { done } = await reader.read();
@@ -342,14 +351,14 @@ export function PlayRoom({
           {
             id: Math.random().toString(36).slice(2),
             from: "system",
-            text: `⚠ El DM no respondió: ${(err as Error).message}`,
+            text: tr("play.dmNoResponse", { msg: (err as Error).message }),
             kind: "public",
           },
         ]);
         setDmThinking(false);
       }
     },
-    [picked, sessionId, storyMode]
+    [picked, sessionId, storyMode, tr]
   );
 
   const sendChat = useCallback(
@@ -413,12 +422,12 @@ export function PlayRoom({
     const head = pendingDice[0];
     if (!head || !picked) return;
     if (!canResolveDmDiceExpression(head.expression, prof, currentData)) {
-      flashToast("No se puede resolver la expresión (p. ej. INT/PB); registra el total arriba.");
+      flashToast(tr("play.resolveExpressionFail"));
       return;
     }
     const rx = resolveDmDiceExpression(head.expression, prof, currentData);
-    roll(rx, head.label ?? "Solicitado por el DM", head.id);
-  }, [pendingDice, picked, prof, currentData, roll, flashToast]);
+    roll(rx, head.label ?? tr("play.diceDmRequested"), head.id);
+  }, [pendingDice, picked, prof, currentData, roll, flashToast, tr]);
 
   const rollSelected = useCallback(() => {
     if (pendingDice.length > 0) {
@@ -441,7 +450,7 @@ export function PlayRoom({
       const breakdown = `Total manual: ${total} (${req.expression}${req.label ? ` · ${req.label}` : ""})`;
       s.emit("dice:report", {
         sessionId,
-        by: { role: "player", playerId: picked.player_id, label: req.label ?? "Solicitado por el DM" },
+        by: { role: "player", playerId: picked.player_id, label: req.label ?? tr("play.diceDmRequested") },
         expression: req.expression,
         total,
         rolls: [total],
@@ -449,24 +458,25 @@ export function PlayRoom({
         breakdown,
       });
     },
-    [picked, sessionId]
+    [picked, sessionId, tr]
   );
 
   if (!picked) {
     return (
       <div className="min-h-screen grain mesh-bg">
         <div className="mx-auto max-w-md px-5 py-12">
-          <p className="label mb-2">Te unes a</p>
+          <p className="label mb-2">{tr("play.joinTitle")}</p>
           <h1 className="mb-6">{storyTitle}</h1>
           <p className="mb-4 text-sm" style={{ color: "var(--color-text-secondary)" }}>
-            Elige tu personaje:
+            {tr("play.pickCharacter")}
           </p>
           <div className="space-y-3">
             {players.map((p) => (
               <button key={p.player_id} onClick={() => setPicked(p)} className="card block w-full text-left">
-                <p>{p.character?.name ?? "Aventurero"}</p>
+                <p>{p.character?.name ?? tr("play.adventurerDefault")}</p>
                 <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                  {p.character?.race ?? ""} · {p.character?.class ?? ""} nv. {p.character?.level ?? 1}
+                  {p.character?.race ?? ""} · {p.character?.class ?? ""} {tr("play.levelAbbrev")}{" "}
+                  {p.character?.level ?? 1}
                 </p>
               </button>
             ))}
@@ -496,9 +506,11 @@ export function PlayRoom({
             <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-text-hint)" }}>
               <span>HP {hp.current}/{hp.max}</span>
               <span>·</span>
-              <span>CA {ac}</span>
+              <span>
+                {tr("play.sheet.acAbbr")} {ac}
+              </span>
               <span>·</span>
-              <span>V{speed}</span>
+              <span>{tr("play.speedBanner", { n: speed })}</span>
             </div>
           </div>
           {statusEffects.length > 0 && (
@@ -522,7 +534,13 @@ export function PlayRoom({
                 background: tab === t ? "var(--color-accent-bg)" : "transparent",
               }}
             >
-              {t[0].toUpperCase() + t.slice(1)}
+              {t === "personaje"
+                ? tr("play.tabPersonaje")
+                : t === "acciones"
+                  ? tr("play.tabAcciones")
+                  : t === "chat"
+                    ? tr("play.tabChat")
+                    : tr("play.tabDados")}
               {t === "dados" && pendingDice.length > 0 && (
                 <span
                   className="ml-1 inline-block rounded-full"
@@ -551,15 +569,12 @@ export function PlayRoom({
                 background: "var(--color-bg-tertiary)",
               }}
               onClick={() => {
-                sendChat(
-                  "Pido información de la escena y del campo de batalla (detalle táctico y sensorial).",
-                  "public"
-                );
+                sendChat(tr("play.sceneRequestPayload"), "public");
                 setTab("chat");
-                flashToast("Mensaje al grupo; el narrador puede pulsar «Continuar historia» cuando toque");
+                flashToast(tr("play.sceneToast"));
               }}
             >
-              Ver escena y campo de batalla
+              {tr("play.viewSceneBattlefield")}
             </button>
           </div>
         )}
@@ -618,7 +633,7 @@ export function PlayRoom({
                   background: chatSubTab === "group" ? "var(--color-accent-bg)" : "transparent",
                 }}
               >
-                Grupo
+                {tr("play.groupTab")}
                 {groupChat.length > 0 && (
                   <span className="ml-1 opacity-70" style={{ fontSize: 10 }}>
                     ({groupChat.length})
@@ -634,7 +649,7 @@ export function PlayRoom({
                   background: chatSubTab === "private" ? "var(--color-accent-bg)" : "transparent",
                 }}
               >
-                Contigo (privado)
+                {tr("play.privateTabLabel")}
                 {privateChat.length > 0 && (
                   <span className="ml-1 opacity-70" style={{ fontSize: 10 }}>
                     ({privateChat.length})
@@ -648,7 +663,7 @@ export function PlayRoom({
                   <>
                     {groupChat.length === 0 && (
                       <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-                        Aquí va la narración del DM y lo que dices en voz alta al grupo.
+                        {tr("play.groupChatEmptyHint")}
                       </p>
                     )}
                     {groupChat.map((m) => (
@@ -656,7 +671,7 @@ export function PlayRoom({
                     ))}
                     {dmThinking && (
                       <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-                        el DM está pensando…
+                        {tr("play.dmThinking")}
                       </p>
                     )}
                   </>
@@ -665,7 +680,7 @@ export function PlayRoom({
                   <>
                     {privateChat.length === 0 && (
                       <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
-                        Solo tú y el DM ven los susurros. No forman parte de la narración del grupo.
+                        {tr("play.privateChatEmptyHint")}
                       </p>
                     )}
                     {privateChat.map((m) => (
@@ -686,7 +701,7 @@ export function PlayRoom({
                     className="input"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Mensaje al grupo (el narrador continúa con «Continuar historia»)…"
+                    placeholder={tr("play.chatPlaceholder")}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -697,7 +712,7 @@ export function PlayRoom({
                   <button
                     className="btn-ghost"
                     onClick={() => handleSendInput("private")}
-                    title="Enviar privado al DM (no es narración del grupo)"
+                    title={tr("play.privateTitle")}
                     style={{ padding: "0 10px" }}
                   >
                     🔒
@@ -712,7 +727,7 @@ export function PlayRoom({
                     className="input w-full"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Susurro solo al DM…"
+                    placeholder={tr("play.whisperPlaceholder")}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -727,14 +742,14 @@ export function PlayRoom({
                       style={{ color: "var(--color-text-hint)" }}
                       onClick={() => setChatSubTab("group")}
                     >
-                      ← Volver al chat del grupo
+                      {tr("play.backToGroup")}
                     </button>
                     <button
                       className="btn-accent"
                       onClick={() => handleSendInput("private")}
                       disabled={!input.trim()}
                     >
-                      Enviar privado
+                      {tr("play.sendPrivateShort")}
                     </button>
                   </div>
                 </div>
@@ -770,6 +785,7 @@ export function PlayRoom({
 }
 
 function ChatItem({ m }: { m: ChatMsg }) {
+  const tr = useTranslations();
   if (m.from === "system") {
     return (
       <p className="text-center text-xs italic" style={{ color: "var(--color-text-hint)" }}>
@@ -794,7 +810,7 @@ function ChatItem({ m }: { m: ChatMsg }) {
       >
         {m.kind === "private" && (
           <span className="badge mb-1" style={{ fontSize: 10 }}>
-            {mine ? "privado al DM" : "🔒 susurro del DM"}
+            {mine ? tr("play.chatPrivateToDm") : tr("play.chatDmWhisper")}
           </span>
         )}
         <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{m.text}</p>
@@ -815,28 +831,29 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function CharacterSheet({ data, level, prof }: { data: CharData; level: number; prof: number }) {
+  const tr = useTranslations();
   const hp = data.hp ?? { current: 0, max: 0, temp: 0 };
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
   const racial = data.abilityRacialBonus ?? {};
   return (
     <div className="space-y-3">
       <div className="card">
-        <p className="label mb-2">Vitales</p>
+        <p className="label mb-2">{tr("play.sheet.vitals")}</p>
         <div className="grid grid-cols-4 gap-2">
           <Stat label="HP" value={`${hp.current}/${hp.max}`} />
-          <Stat label="CA" value={data.ac ?? 10} />
-          <Stat label="Vel." value={data.speed ?? 30} />
-          <Stat label="PB" value={`+${prof}`} />
+          <Stat label={tr("play.sheet.acAbbr")} value={data.ac ?? 10} />
+          <Stat label={tr("play.sheet.speedAbbr")} value={data.speed ?? 30} />
+          <Stat label={tr("play.sheet.pbAbbr")} value={`+${prof}`} />
         </div>
         {hp.temp > 0 && (
           <p className="mt-2 text-xs" style={{ color: "var(--color-accent)" }}>
-            +{hp.temp} HP temporales
+            {tr("play.sheet.hpTemp", { n: hp.temp })}
           </p>
         )}
       </div>
 
       <div className="card">
-        <p className="label mb-2">Atributos</p>
+        <p className="label mb-2">{tr("play.sheet.attributes")}</p>
         <div className="grid grid-cols-6 gap-1">
           {ABILITIES_ORDER.map((a) => {
             const total = totalAbility(abilities, racial, a);
@@ -857,7 +874,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
 
       {(data.equipment ?? []).length > 0 && (
         <div className="card">
-          <p className="label mb-2">Equipamiento</p>
+          <p className="label mb-2">{tr("play.sheet.equipment")}</p>
           <ul className="space-y-1 text-sm">
             {(data.equipment ?? []).map((e, i) => (
               <li key={i}>
@@ -872,11 +889,11 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
 
       {(data.spells?.known?.length ?? 0) > 0 && (
         <div className="card">
-          <p className="label mb-2">Conjuros</p>
+          <p className="label mb-2">{tr("play.sheet.spells")}</p>
           <div className="mb-2 flex flex-wrap gap-1">
             {Object.entries(data.spells?.slots ?? {}).map(([lvl, s]) => (
               <span key={lvl} className="badge" style={{ fontSize: 10 }}>
-                Nv {lvl}: {s.max - s.used}/{s.max}
+                {tr("play.sheet.slotShort", { lvl })}: {s.max - s.used}/{s.max}
               </span>
             ))}
           </div>
@@ -891,7 +908,7 @@ function CharacterSheet({ data, level, prof }: { data: CharData; level: number; 
       )}
 
       <p className="text-center text-xs" style={{ color: "var(--color-text-hint)" }}>
-        nv. {level} · XP {data.xp ?? 0}
+        {tr("play.sheet.footerLevel", { level, xp: data.xp ?? 0 })}
       </p>
     </div>
   );
@@ -908,70 +925,88 @@ function ActionsPanel({
   prof: number;
   onAction: (text: string) => void;
 }) {
+  const tr = useTranslations();
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
   const racial = data.abilityRacialBonus ?? {};
   const skills = data.skills ?? [];
-  const weapons = (data.equipment ?? []).filter((e) =>
-    /espada|hacha|arco|daga|maza|lanza|martillo|ballesta|bast(ó|o)n|jabalina|cimitarra|garrote|rapiera|lanza|honda/i.test(e.name)
-  );
-  const consumables = (data.equipment ?? []).filter((e) =>
-    /poci(ó|o)n|antorcha|tienda|raci(ó|o)n|cuerda|ganz(ú|u)a/i.test(e.name)
-  );
+  const weapons = (data.equipment ?? []).filter((e) => WEAPON_NAME_PATTERN.test(e.name));
+  const consumables = (data.equipment ?? []).filter((e) => CONSUMABLE_NAME_PATTERN.test(e.name));
   const spells = data.spells?.known ?? [];
 
   const rollSkill = (skill: string) => {
     const ability = SKILL_ABILITY[skill.toLowerCase()] ?? "des";
     const mod = abilityMod(totalAbility(abilities, racial, ability)) + prof;
-    onAction(`Intento usar ${skill} (${ability.toUpperCase()}, modificador ${mod >= 0 ? "+" : ""}${mod}).`);
+    onAction(
+      tr("play.actionTrySkill", {
+        skill,
+        abl: ability.toUpperCase(),
+        mod: formatMod(mod),
+      }),
+    );
   };
 
   const rollSave = (ability: Ability) => {
     const base = abilityMod(totalAbility(abilities, racial, ability));
     const hasProf = (data.savingThrows ?? []).includes(ability);
     const mod = base + (hasProf ? prof : 0);
-    onAction(`Hago una tirada de salvación de ${ability.toUpperCase()} (${mod >= 0 ? "+" : ""}${mod}${hasProf ? ", con proficiencia" : ""}).`);
+    onAction(
+      tr("play.actionSave", {
+        abl: ability.toUpperCase(),
+        mod: formatMod(mod),
+        profSuffix: hasProf ? tr("play.actionSaveProfSuffix") : "",
+      }),
+    );
   };
 
   const attack = (weapon: { name: string; damage?: string }) => {
-    const usesDex = /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina/i.test(weapon.name);
+    const usesDex =
+      /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina|bow|crossbow|dagger|rapier|scimitar|sling|shortsword|longsword/i.test(
+        weapon.name,
+      );
     const ab = usesDex ? "des" : "fue";
     const mod = abilityMod(totalAbility(abilities, racial, ab)) + prof;
     onAction(
-      `Ataco con ${weapon.name} (bono al ataque ${mod >= 0 ? "+" : ""}${mod})${weapon.damage ? `, daño ${weapon.damage}` : ""}.`
+      tr("play.actionAttack", {
+        weapon: weapon.name,
+        mod: formatMod(mod),
+        dmgSuffix: weapon.damage ? tr("play.actionAttackDmgSuffix", { dmg: weapon.damage }) : "",
+      }),
     );
   };
 
   const castSpell = (s: { name: string; level: number }) => {
-    onAction(`Lanzo el conjuro ${s.name}${s.level > 0 ? ` (nivel ${s.level})` : " (truco)"}. ¿Qué debo tirar?`);
+    const levelLabel =
+      s.level === 0 ? tr("play.actionCastCantrip") : tr("play.actionCastLevel", { n: s.level });
+    onAction(tr("play.actionCastSpell", { name: s.name, levelLabel }));
   };
 
   const useItem = (name: string) => {
-    onAction(`Uso ${name}.`);
+    onAction(tr("play.actionUseItem", { name }));
   };
 
   return (
     <div className="space-y-3">
       <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-        Cada acción queda en el chat del grupo; el narrador usa «Continuar historia» en su pantalla cuando todos hayan actuado. Si el DM pide tirada, usa la sección dados o el total manual.
+        {tr("play.actionsHelp")}
       </p>
 
       <div className="card">
-        <p className="label mb-2">Combate</p>
+        <p className="label mb-2">{tr("play.sectionCombat")}</p>
         <div className="grid grid-cols-2 gap-2">
           <ActionTile
-            label="Iniciativa"
+            label={tr("play.tileInitiative")}
             subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0))}
             onClick={() => {
               const mod = abilityMod(totalAbility(abilities, racial, "des")) + (data.initiativeBonus ?? 0);
-              onAction(`Tiro iniciativa (${mod >= 0 ? "+" : ""}${mod}).`);
+              onAction(tr("play.actionInitiative", { mod: formatMod(mod) }));
             }}
           />
           <ActionTile
-            label="Golpe sin arma"
+            label={tr("play.tileUnarmed")}
             subtitle={formatMod(abilityMod(totalAbility(abilities, racial, "fue")) + prof)}
             onClick={() => {
               const mod = abilityMod(totalAbility(abilities, racial, "fue")) + prof;
-              onAction(`Ataco sin arma (${mod >= 0 ? "+" : ""}${mod}).`);
+              onAction(tr("play.actionUnarmed", { mod: formatMod(mod) }));
             }}
           />
         </div>
@@ -979,17 +1014,23 @@ function ActionsPanel({
 
       {weapons.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Armas equipadas</p>
+          <p className="label mb-2">{tr("play.equippedWeapons")}</p>
           <div className="grid grid-cols-1 gap-2">
             {weapons.map((w, i) => {
-              const usesDex = /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina/i.test(w.name);
+              const usesDex =
+                /arco|ballesta|daga|rapiera|cimitarra|honda|jabalina|bow|crossbow|dagger|rapier|scimitar|sling|shortsword|longsword/i.test(
+                  w.name,
+                );
               const ab: Ability = usesDex ? "des" : "fue";
               const mod = abilityMod(totalAbility(abilities, racial, ab)) + prof;
               return (
                 <ActionTile
                   key={i}
-                  label={`Atacar con ${w.name}`}
-                  subtitle={`1d20${formatMod(mod)}${w.damage ? ` · daño ${w.damage}` : ""}`}
+                  label={tr("play.attackWith", { weapon: w.name })}
+                  subtitle={tr("play.weaponSubtitle", {
+                    mod: formatMod(mod),
+                    dmgSuffix: w.damage ? tr("play.weaponDmgSuffix", { dmg: w.damage }) : "",
+                  })}
                   onClick={() => attack(w)}
                 />
               );
@@ -1000,13 +1041,17 @@ function ActionsPanel({
 
       {spells.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Conjuros</p>
+          <p className="label mb-2">{tr("play.spellsActions")}</p>
           <div className="grid grid-cols-1 gap-2">
             {spells.map((s, i) => (
               <ActionTile
                 key={i}
-                label={`Lanzar ${s.name}`}
-                subtitle={s.level === 0 ? "truco" : `nivel ${s.level}${s.prepared ? " · preparado" : ""}`}
+                label={tr("play.castSpellTile", { name: s.name })}
+                subtitle={
+                  s.level === 0
+                    ? tr("play.spellCantrip")
+                    : `${tr("play.spellLevel", { n: s.level })}${s.prepared ? tr("play.spellPrepared") : ""}`
+                }
                 onClick={() => castSpell(s)}
               />
             ))}
@@ -1015,7 +1060,9 @@ function ActionsPanel({
       )}
 
       <div className="card">
-        <p className="label mb-2">Habilidades ({skills.length ? "proficiencia" : "sin proficiencias"})</p>
+        <p className="label mb-2">
+          {skills.length ? tr("play.skillsHeadingProf") : tr("play.skillsHeadingNone")}
+        </p>
         <div className="grid grid-cols-2 gap-2">
           {(skills.length > 0 ? skills : Object.keys(SKILL_ABILITY).slice(0, 6)).map((s) => {
             const ab = SKILL_ABILITY[s.toLowerCase()] ?? "sab";
@@ -1033,7 +1080,7 @@ function ActionsPanel({
       </div>
 
       <div className="card">
-        <p className="label mb-2">Salvaciones</p>
+        <p className="label mb-2">{tr("play.saves")}</p>
         <div className="grid grid-cols-3 gap-2">
           {ABILITIES_ORDER.map((a) => {
             const base = abilityMod(totalAbility(abilities, racial, a));
@@ -1053,13 +1100,13 @@ function ActionsPanel({
 
       {consumables.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Consumibles</p>
+          <p className="label mb-2">{tr("play.consumables")}</p>
           <div className="grid grid-cols-2 gap-2">
             {consumables.map((c, i) => (
               <ActionTile
                 key={i}
                 label={c.name}
-                subtitle={c.qty > 1 ? `×${c.qty}` : "usar"}
+                subtitle={c.qty > 1 ? `×${c.qty}` : tr("play.useConsumable")}
                 onClick={() => useItem(c.name)}
               />
             ))}
@@ -1068,7 +1115,7 @@ function ActionsPanel({
       )}
 
       <p className="text-center text-[11px]" style={{ color: "var(--color-text-hint)" }}>
-        Nivel {level} · Bonificador de proficiencia +{prof}
+        {tr("play.footerProf", { level, prof })}
       </p>
     </div>
   );
@@ -1101,6 +1148,7 @@ function DicePanel({
   onReportManual: (r: DiceRequest, total: number) => void;
   onDismiss: (id: string) => void;
 }) {
+  const tr = useTranslations();
   const abilities = data.abilities ?? { fue: 10, des: 10, con: 10, int: 10, sab: 10, car: 10 };
   const racial = data.abilityRacialBonus ?? {};
   const savingThrows = data.savingThrows ?? [];
@@ -1141,10 +1189,10 @@ function DicePanel({
       {pending.length > 0 && (
         <div className="card" style={{ border: "1px solid var(--color-accent)" }}>
           <p className="label mb-2" style={{ color: "var(--color-accent)" }}>
-            El DM pide tiradas ({pending.length})
+            {tr("play.diceDmRequests", { n: pending.length })}
           </p>
           <p className="mb-2 text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
-            Dado físico: escribe el total y pulsa «Registrar». La tirada virtual va en el botón naranja abajo (primera en cola; si hay CD y la superas, sigue la siguiente sola).
+            {tr("play.dicePhysicalHint")}
           </p>
           <div className="space-y-2">
             {pending.map((r) => (
@@ -1158,7 +1206,7 @@ function DicePanel({
                     <p className="text-sm font-medium">{r.label ?? r.expression}</p>
                     <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
                       {r.expression}
-                      {r.dc ? ` · CD ${r.dc}` : ""}
+                      {r.dc ? ` · ${tr("play.dc")} ${r.dc}` : ""}
                     </p>
                   </div>
                   <button
@@ -1166,7 +1214,7 @@ function DicePanel({
                     className="btn-ghost shrink-0"
                     style={{ padding: "6px 10px", fontSize: 12 }}
                     onClick={() => onDismiss(r.id)}
-                    title="Descartar esta petición"
+                    title={tr("play.dismissRequest")}
                   >
                     ✕
                   </button>
@@ -1177,7 +1225,7 @@ function DicePanel({
                     inputMode="numeric"
                     className="input flex-1"
                     style={{ height: 36, fontSize: 13 }}
-                    placeholder="Total (dado físico o manual)"
+                    placeholder={tr("play.totalPlaceholder")}
                     value={manualById[r.id] ?? ""}
                     onChange={(e) => setManualById((prev) => ({ ...prev, [r.id]: e.target.value }))}
                     onKeyDown={(e) => {
@@ -1211,7 +1259,7 @@ function DicePanel({
                       });
                     }}
                   >
-                    Registrar
+                    {tr("play.register")}
                   </button>
                 </div>
               </div>
@@ -1221,7 +1269,7 @@ function DicePanel({
       )}
 
       <div className="card">
-        <p className="label mb-2">Dado</p>
+        <p className="label mb-2">{tr("play.dieSingular")}</p>
         <div className="grid grid-cols-4 gap-2">
           {dice.map((d) => (
             <button
@@ -1241,7 +1289,7 @@ function DicePanel({
       </div>
 
       <div className="card">
-        <p className="label mb-2">Modificador</p>
+        <p className="label mb-2">{tr("play.modifier")}</p>
         <div className="flex flex-wrap gap-1">
           {modifierChips.map((c) => (
             <button
@@ -1269,29 +1317,40 @@ function DicePanel({
         {queueVirtualLine ? (
           <>
             <span className="block text-[11px] font-medium opacity-90">
-              Tirada virtual {queueVirtualLine.index}/{queueVirtualLine.total}
-              {typeof queueVirtualLine.dc === "number" ? ` · CD ${queueVirtualLine.dc}` : ""}
+              {tr("play.rollVirtualLine", {
+                i: queueVirtualLine.index,
+                total: queueVirtualLine.total,
+                dcSuffix:
+                  typeof queueVirtualLine.dc === "number"
+                    ? tr("play.rollVirtualDcSuffix", { dc: queueVirtualLine.dc })
+                    : "",
+              })}
             </span>
             <span className="mt-0.5 block">
-              🎲 Tirar {queueVirtualLine.resolved}
-              {queueVirtualLine.label ? ` · ${queueVirtualLine.label}` : ""}
+              {tr("play.rollVirtualButton", {
+                expr: queueVirtualLine.resolved,
+                labelSuffix: queueVirtualLine.label
+                  ? tr("play.rollVirtualLabelSuffix", { label: queueVirtualLine.label })
+                  : "",
+              })}
             </span>
             {!queueVirtualLine.resolvable ? (
-              <span className="mt-1 block text-[11px] opacity-90">Usa «Registrar» arriba para esta petición</span>
+              <span className="mt-1 block text-[11px] opacity-90">{tr("play.rollUseRegister")}</span>
             ) : null}
           </>
         ) : (
           <>
-            🎲 Tirar {selected}
-            {modifier !== 0 ? formatMod(modifier) : ""}
-            {selectedLabel ? ` · ${selectedLabel}` : ""}
+            {tr("play.rollDiceButton", {
+              dice: `${selected}${modifier !== 0 ? formatMod(modifier) : ""}`,
+              labelSuffix: selectedLabel ? ` · ${selectedLabel}` : "",
+            })}
           </>
         )}
       </button>
 
       {recent.length > 0 && (
         <div className="card">
-          <p className="label mb-2">Últimas tiradas</p>
+          <p className="label mb-2">{tr("play.recentRolls")}</p>
           <ul className="space-y-1 text-sm">
             {recent.map((r, i) => (
               <li key={i} className="flex items-baseline gap-2">

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useTranslations } from "@/components/LocaleProvider";
 
 export type LibraryStory = {
   id: string;
@@ -31,12 +32,13 @@ export function LibraryGrid({
   stories: LibraryStory[];
   characters: LibraryCharacter[];
 }) {
+  const tr = useTranslations();
   const router = useRouter();
   const [busyStory, setBusyStory] = useState<string | null>(null);
   const [busyChar, setBusyChar] = useState<string | null>(null);
 
   async function deleteStory(story: LibraryStory) {
-    const ok = window.confirm(`¿Eliminar la aventura "${story.title}"? Se borrarán sus sesiones y mensajes.`);
+    const ok = window.confirm(tr("library.deleteStoryConfirm", { title: story.title }));
     if (!ok) return;
     setBusyStory(story.id);
     try {
@@ -48,7 +50,7 @@ export function LibraryGrid({
   }
 
   async function renameStory(story: LibraryStory) {
-    const title = window.prompt("Nuevo título de la aventura", story.title);
+    const title = window.prompt(tr("library.renamePrompt"), story.title);
     if (title == null) return;
     const trimmed = title.trim();
     if (!trimmed || trimmed === story.title) return;
@@ -66,7 +68,7 @@ export function LibraryGrid({
   }
 
   async function deleteCharacter(ch: LibraryCharacter) {
-    const ok = window.confirm(`¿Eliminar el personaje "${ch.name}"?`);
+    const ok = window.confirm(tr("library.deleteCharConfirm", { name: ch.name }));
     if (!ok) return;
     setBusyChar(ch.id);
     try {
@@ -81,13 +83,13 @@ export function LibraryGrid({
     <>
       <section className="mb-16">
         <div className="mb-6 flex items-end justify-between">
-          <h2>Historias</h2>
+          <h2>{tr("library.stories")}</h2>
           <Link href="/story/new" className="text-sm" style={{ color: "var(--color-accent)" }}>
-            Nueva historia →
+            {tr("library.newStory")}
           </Link>
         </div>
         {stories.length === 0 ? (
-          <EmptyState label="Aún no hay aventuras guardadas." cta={{ href: "/story/new", label: "Crear la primera" }} />
+          <EmptyState label={tr("library.emptyStories")} cta={{ href: "/story/new", label: tr("library.createFirst") }} />
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 stagger">
             {stories.map((s) => {
@@ -100,19 +102,21 @@ export function LibraryGrid({
                 >
                   <Link href={href} className="block">
                     <div className="mb-3 flex items-center justify-between">
-                      <span className="badge">{s.mode === "auto" ? "Automático" : "Asistente"}</span>
+                      <span className="badge">{s.mode === "auto" ? tr("settings.mode.auto") : tr("settings.mode.assistant")}</span>
                       <span className="text-[11px]" style={{ color: "var(--color-text-hint)" }}>
-                        {s.playerCount} {s.playerCount === 1 ? "jugador" : "jugadores"} · turno {s.turn}
+                        {s.playerCount}{" "}
+                        {s.playerCount === 1 ? tr("library.playerOne") : tr("library.playersMany")} · {tr("library.turnWord")}{" "}
+                        {s.turn}
                       </span>
                     </div>
                     <h3 className="mb-1">{s.title}</h3>
                     <p className="line-clamp-3 text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                      {s.summary ?? "Sin resumen todavía."}
+                      {s.summary ?? tr("library.noSummary")}
                     </p>
                   </Link>
                   <div className="mt-4 flex items-center gap-2">
                     <Link href={href} className="btn-ghost" style={{ flex: 1, padding: "6px 10px", fontSize: 12 }}>
-                      Abrir
+                      {tr("library.open")}
                     </Link>
                     <button
                       className="btn-ghost"
@@ -120,7 +124,7 @@ export function LibraryGrid({
                       onClick={() => renameStory(s)}
                       disabled={busyStory === s.id}
                     >
-                      Renombrar
+                      {tr("library.rename")}
                     </button>
                     <button
                       className="btn-ghost"
@@ -128,7 +132,7 @@ export function LibraryGrid({
                       onClick={() => deleteStory(s)}
                       disabled={busyStory === s.id}
                     >
-                      Eliminar
+                      {tr("library.deleteShort")}
                     </button>
                   </div>
                 </div>
@@ -140,13 +144,13 @@ export function LibraryGrid({
 
       <section>
         <div className="mb-6 flex items-end justify-between">
-          <h2>Personajes</h2>
+          <h2>{tr("library.characters")}</h2>
           <Link href="/character/new" className="text-sm" style={{ color: "var(--color-accent)" }}>
-            Nuevo personaje →
+            {tr("library.newCharacter")}
           </Link>
         </div>
         {characters.length === 0 ? (
-          <EmptyState label="No has creado personajes todavía." cta={{ href: "/character/new", label: "Crear personaje" }} />
+          <EmptyState label={tr("library.noCharsYet")} cta={{ href: "/character/new", label: tr("library.createCharacter") }} />
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4 stagger">
             {characters.map((c) => (
@@ -160,7 +164,7 @@ export function LibraryGrid({
                   </div>
                   <h3 className="mb-0.5">{c.name}</h3>
                   <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    {c.race ?? "—"} · {c.class ?? "—"} · Nivel {c.level}
+                    {c.race ?? tr("common.empty")} · {c.class ?? tr("common.empty")} · {tr("library.level")} {c.level}
                   </p>
                 </Link>
                 <div className="mt-3 flex gap-2">
@@ -169,7 +173,7 @@ export function LibraryGrid({
                     className="btn-ghost"
                     style={{ flex: 1, padding: "6px 10px", fontSize: 12 }}
                   >
-                    Editar
+                    {tr("library.edit")}
                   </Link>
                   <button
                     className="btn-ghost"
@@ -177,7 +181,7 @@ export function LibraryGrid({
                     onClick={() => deleteCharacter(c)}
                     disabled={busyChar === c.id}
                   >
-                    Eliminar
+                    {tr("library.deleteShort")}
                   </button>
                 </div>
               </div>

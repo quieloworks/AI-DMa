@@ -17,6 +17,11 @@ import {
 } from "@/lib/character";
 import { findFeat } from "@/lib/feats";
 import { SpellDailyPrep } from "./SpellDailyPrep";
+import { getGlobalSettings } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/t";
+import { displayRaceName } from "@/lib/i18n/race-labels";
+import { spellForLocale } from "@/lib/i18n/spell-i18n";
+import { findSpellByName } from "@/lib/spells";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +34,16 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
     .get(id);
   if (!row) notFound();
 
+  const locale = getGlobalSettings().locale;
+  const tr = (key: string, vars?: Record<string, string | number>) => t(locale, key, vars);
+
   const parsed = CharacterSchema.safeParse({ ...JSON.parse(row.data_json), id });
-  if (!parsed.success) return <Shell><p>Hoja inválida.</p></Shell>;
+  if (!parsed.success)
+    return (
+      <Shell active="character">
+        <p>{tr("characterSheet.invalid")}</p>
+      </Shell>
+    );
   const ch = parsed.data;
   const spellRows = effectiveSpellKnownForCharacter(ch);
 
@@ -38,33 +51,33 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
     <Shell active="character">
       <div className="mb-8 flex items-end justify-between">
         <div>
-          <span className="badge mb-3">Hoja de personaje</span>
+          <span className="badge mb-3">{tr("characterSheet.badge")}</span>
           <h1>{ch.name}</h1>
           {ch.playerName && (
             <p className="mt-1 text-xs" style={{ color: "var(--color-text-hint)" }}>
-              Jugador: {ch.playerName}
+              {tr("characterSheet.player")} {ch.playerName}
             </p>
           )}
           <p className="mt-1" style={{ color: "var(--color-text-secondary)" }}>
-            {ch.race} · {ch.class} nivel {ch.level} · {ch.background}
+            {displayRaceName(ch.race, locale)} · {ch.class} {tr("characterSheet.levelWord")} {ch.level} · {ch.background}
           </p>
         </div>
         <div className="flex gap-2">
           <Link href={`/api/character/${ch.id}/pdf`} className="btn-ghost" prefetch={false}>
-            Exportar PDF
+            {tr("characterSheet.exportPdf")}
           </Link>
           <Link href={`/character/${ch.id}/edit`} className="btn-ghost">
-            Editar
+            {tr("characterSheet.edit")}
           </Link>
           <Link href="/character/new" className="btn-accent">
-            Nuevo
+            {tr("characterSheet.new")}
           </Link>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1fr_1fr]">
         <div className="card">
-          <p className="label mb-3">Atributos</p>
+          <p className="label mb-3">{tr("characterSheet.attributes")}</p>
           <div className="grid grid-cols-3 gap-2">
             {ABILITIES.map((a) => (
               <div key={a} className="rounded-md p-2 text-center" style={{ background: "var(--color-bg-tertiary)" }}>
@@ -75,7 +88,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             ))}
           </div>
           <div className="my-4 divider" />
-          <p className="label mb-2">Salvaciones</p>
+          <p className="label mb-2">{tr("characterSheet.saves")}</p>
           <ul className="space-y-1 text-sm">
             {ABILITIES.map((a) => (
               <li key={a} className="flex justify-between">
@@ -153,14 +166,18 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
             </div>
           )}
           <ul className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
-            {spellRows.map((s, i) => (
-              <li key={i}>
-                <span style={{ color: "var(--color-accent)" }}>
-                  {s.level === 0 ? "Truco" : `Nv ${s.level}`}
-                </span>{" "}
-                · {s.prepared ? "●" : "○"} {s.name}
-              </li>
-            ))}
+            {spellRows.map((s, i) => {
+              const cat = findSpellByName(s.name);
+              const dispName = cat ? spellForLocale(cat, locale).name : s.name;
+              return (
+                <li key={i}>
+                  <span style={{ color: "var(--color-accent)" }}>
+                    {s.level === 0 ? "Truco" : `Nv ${s.level}`}
+                  </span>{" "}
+                  · {s.prepared ? "●" : "○"} {dispName}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

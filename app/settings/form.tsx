@@ -1,17 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import type { GlobalSettings } from "@/lib/i18n/global-settings";
+import type { AppLocale } from "@/lib/i18n/locale";
+import { useTranslations } from "@/components/LocaleProvider";
 
-type Settings = {
-  diceDm: "auto" | "manual";
-  diceDefault: "auto" | "manual";
-  voice: string;
-  sfx: boolean;
-  defaultMode: "auto" | "assistant";
-};
-
-export function SettingsForm({ initial }: { initial: Settings }) {
-  const [s, setS] = useState<Settings>(initial);
+export function SettingsForm({ initial }: { initial: GlobalSettings }) {
+  const tr = useTranslations();
+  const [s, setS] = useState<GlobalSettings>(initial);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
@@ -20,29 +16,70 @@ export function SettingsForm({ initial }: { initial: Settings }) {
     await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) });
     setSaving(false);
     setSavedAt(Date.now());
+    window.location.reload();
   }
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <Pair label="Dados del DM" help="¿La app tira automáticamente o el DM reporta manualmente?">
-        <Toggle value={s.diceDm} options={[{ v: "auto", l: "Automático" }, { v: "manual", l: "Manual" }]} onChange={(v) => setS({ ...s, diceDm: v as "auto" | "manual" })} />
+      <Pair label={tr("settings.locale")} help={tr("settings.localeHelp")}>
+        <Toggle
+          value={s.locale}
+          options={[
+            { v: "es", l: tr("settings.locale.es") },
+            { v: "en", l: tr("settings.locale.en") },
+          ]}
+          onChange={(v) => setS({ ...s, locale: v as AppLocale })}
+        />
       </Pair>
-      <Pair label="Dados de jugadores (por defecto)" help="Cada jugador puede sobreescribirlo en su celular.">
-        <Toggle value={s.diceDefault} options={[{ v: "auto", l: "Automático" }, { v: "manual", l: "Manual" }]} onChange={(v) => setS({ ...s, diceDefault: v as "auto" | "manual" })} />
+      <Pair label={tr("settings.diceDm")} help={tr("settings.diceDmHelp")}>
+        <Toggle
+          value={s.diceDm}
+          options={[
+            { v: "auto", l: tr("settings.auto") },
+            { v: "manual", l: tr("settings.manual") },
+          ]}
+          onChange={(v) => setS({ ...s, diceDm: v as "auto" | "manual" })}
+        />
       </Pair>
-      <Pair label="Modo DM por defecto">
-        <Toggle value={s.defaultMode} options={[{ v: "auto", l: "Automático" }, { v: "assistant", l: "Asistente" }]} onChange={(v) => setS({ ...s, defaultMode: v as "auto" | "assistant" })} />
+      <Pair label={tr("settings.diceDefault")} help={tr("settings.diceDefaultHelp")}>
+        <Toggle
+          value={s.diceDefault}
+          options={[
+            { v: "auto", l: tr("settings.auto") },
+            { v: "manual", l: tr("settings.manual") },
+          ]}
+          onChange={(v) => setS({ ...s, diceDefault: v as "auto" | "manual" })}
+        />
       </Pair>
-      <Pair label="Efectos de sonido">
-        <Toggle value={s.sfx ? "on" : "off"} options={[{ v: "on", l: "Activados" }, { v: "off", l: "Silencio" }]} onChange={(v) => setS({ ...s, sfx: v === "on" })} />
+      <Pair label={tr("settings.modeDefault")}>
+        <Toggle
+          value={s.defaultMode}
+          options={[
+            { v: "auto", l: tr("settings.mode.auto") },
+            { v: "assistant", l: tr("settings.mode.assistant") },
+          ]}
+          onChange={(v) => setS({ ...s, defaultMode: v as "auto" | "assistant" })}
+        />
       </Pair>
-      <Pair label="Voz (nombre)" help="Nombre de voz del sistema (p. ej. Paulina en macOS). Se usa si el proveedor de voz es «Voz del sistema».">
+      <Pair label={tr("settings.sfx")}>
+        <Toggle
+          value={s.sfx ? "on" : "off"}
+          options={[
+            { v: "on", l: tr("settings.sfxOn") },
+            { v: "off", l: tr("settings.sfxOff") },
+          ]}
+          onChange={(v) => setS({ ...s, sfx: v === "on" })}
+        />
+      </Pair>
+      <Pair label={tr("settings.voice")} help={tr("settings.voiceHelp")}>
         <input className="input" value={s.voice} onChange={(e) => setS({ ...s, voice: e.target.value })} />
       </Pair>
 
       <div className="flex items-center gap-3 md:col-span-2">
-        <button className="btn-accent" onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</button>
-        {savedAt && <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>Guardado.</span>}
+        <button className="btn-accent" onClick={save} disabled={saving}>
+          {saving ? tr("settings.saving") : tr("settings.save")}
+        </button>
+        {savedAt && <span className="text-xs" style={{ color: "var(--color-text-hint)" }}>{tr("settings.saved")}</span>}
       </div>
     </div>
   );

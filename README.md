@@ -75,6 +75,12 @@ This is not plain `next dev`: **`tsx server.ts`** creates a **Node HTTP server**
 
 At play time, `retrieveRules()` (`server/rag.ts`) combines **vector search** (cosine / distance in sqlite-vec) with **FTS fallback or boost** if vectors fail or the index is missing — results are injected into the DM prompt with a token budget (`server/dm/prompt-budget.ts`).
 
+#### Language vs RAG rule text
+
+Application language (`locale` in global SQLite settings — **Settings → Application language**) drives the UI, server-facing messages, and DM **instruction** prompts (`server/dm/prompt-locale-bundle.ts`). Those prompts ask the model to reply in Spanish or English accordingly.
+
+**Player’s Handbook snippets** injected as `[R#]` still appear in whichever language was ingested from your PDF (`npm run ingest:handbook`). Using English UI/DM with a Spanish PHB index therefore yields **Spanish rule excerpts inside the DM context**, while narration may be English — to align both, ingest an English PHB (separate ingest / future multi-index workflow) or accept bilingual rules context.
+
 ### 3. Chat turn `POST /api/chat` (`app/api/chat/route.ts`)
 
 1. Load **session** and **story** from **better-sqlite3** (`lib/db.ts`).

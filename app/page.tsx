@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
+import { serverT } from "@/lib/i18n/server";
 import { LibraryGrid, type LibraryStory, type LibraryCharacter } from "./library";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +68,7 @@ export default function HomePage() {
     portrait: c.portrait,
   }));
 
+  const tr = serverT;
   return (
     <Shell active="home">
       <section
@@ -75,22 +77,22 @@ export default function HomePage() {
       >
         <div className="relative grid grid-cols-1 gap-12 px-10 py-16 lg:grid-cols-[1.6fr_1fr]">
           <div className="stagger max-w-2xl">
-            <span className="badge mb-6">v0.1 · Ollama + gemma4:e2b</span>
+            <span className="badge mb-6">{tr("home.badge")}</span>
             <h1 className="mb-6" style={{ fontFamily: "var(--font-display)" }}>
-              Una mesa de <em style={{ color: "var(--color-accent)" }}>Dragones</em>,
+              {tr("home.hero1")}{" "}
+              <em style={{ color: "var(--color-accent)" }}>{tr("home.hero2")}</em>,
               <br />
-              un maestro que no duerme.
+              {tr("home.hero3")}
             </h1>
             <p className="mb-8 max-w-xl" style={{ color: "var(--color-text-secondary)", fontSize: 17 }}>
-              Juega D&amp;D 5E con un Dungeon Master impulsado por IA local. Crea personajes, recorre aventuras
-              narradas con voz, y deja que tus amigos se unan desde el celular a la misma red.
+              {tr("home.lead")}
             </p>
             <div className="flex flex-wrap gap-3">
               <Link href="/story/new" className="btn-accent">
-                Comenzar una aventura
+                {tr("home.cta.story")}
               </Link>
               <Link href="/character/new" className="btn-ghost">
-                Crear personaje
+                {tr("home.cta.character")}
               </Link>
             </div>
           </div>

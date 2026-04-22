@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { getDb, getMeta } from "@/lib/db";
+import { serverT } from "@/lib/i18n/server";
 
 function resolveActiveStoryHref(): string {
   try {
@@ -22,6 +23,7 @@ function resolveActiveStoryHref(): string {
 export function Shell({ children, active }: { children: ReactNode; active?: string }) {
   const storyHref = resolveActiveStoryHref();
   const hasActive = storyHref !== "/story/new";
+  const tr = serverT;
   return (
     <div className="relative min-h-screen grain">
       <header
@@ -38,19 +40,19 @@ export function Shell({ children, active }: { children: ReactNode; active?: stri
               <span style={{ fontFamily: "var(--font-display)", fontSize: 20, letterSpacing: "-0.02em" }}>
                 Mesa
               </span>
-              <span className="label">DM local — D&amp;D 5E</span>
+              <span className="label">{tr("shell.subtitle")}</span>
             </div>
           </Link>
           <nav className="flex items-center gap-1">
-            <NavLink href="/" active={active === "home"} label="Baúl" />
+            <NavLink href="/" active={active === "home"} label={tr("shell.nav.home")} />
             <NavLink
               href={storyHref}
               active={active === "story"}
-              label="Historia"
-              badge={hasActive ? "en curso" : undefined}
+              label={tr("shell.nav.story")}
+              badge={hasActive ? tr("shell.nav.storyBadge") : undefined}
             />
-            <NavLink href="/character/new" active={active === "character"} label="Personajes" />
-            <NavLink href="/settings" active={active === "settings"} label="Ajustes" />
+            <NavLink href="/character/new" active={active === "character"} label={tr("shell.nav.characters")} />
+            <NavLink href="/settings" active={active === "settings"} label={tr("shell.nav.settings")} />
           </nav>
         </div>
       </header>
