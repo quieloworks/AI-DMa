@@ -454,7 +454,7 @@ function renderAdventureBlock(snap: SessionSnapshot, caps: DmRagRenderCaps): str
 function sharedDirectiveTail(snap: SessionSnapshot, includeEngagement: boolean): string {
   const L = getDmLocaleBlocks(snap.locale);
   const combatBlock = isCombatWorkflow(snap) ? L.combatDirectives : L.combatHint;
-  const parts: string[] = [L.narrativeVoice, L.technicalSceneRule];
+  const parts: string[] = [L.narrativeVoice, L.actorAgency, L.technicalSceneRule];
   if (includeEngagement) parts.push(L.engagementDirectives);
   parts.push(combatBlock, L.mechanicalDirectives, L.sheetAuthorityLocks, L.resolutionDirective, L.formatBlock);
   return parts.join("\n\n");
