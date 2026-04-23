@@ -16,6 +16,8 @@ export type BattleParticipant = {
   y: number;
   hp?: { current: number; max: number };
   status?: string[];
+  /** Solo DM / modelo: temperamento y prioridades; nunca se envía a jugadores (véase stripBattleMapDmSecrets). */
+  dm_personality?: string;
 };
 
 export type BattleMap = {

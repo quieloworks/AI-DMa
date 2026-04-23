@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { BattleMap } from "@/app/story/[id]/map";
 import { getDb } from "@/lib/db";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import { serverT } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
@@ -41,12 +43,15 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     )
     .all(id);
 
+  const state = JSON.parse(session.state_json) as { battleMap?: BattleMap | null };
+  if (state.battleMap) state.battleMap = stripBattleMapDmSecrets(state.battleMap);
+
   return NextResponse.json({
     session,
     story,
     players: characters,
     messages,
-    state: JSON.parse(session.state_json),
+    state,
   });
 }
 

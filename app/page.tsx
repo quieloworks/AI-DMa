@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { getDb } from "@/lib/db";
 import { serverT } from "@/lib/i18n/server";
+import { parseCharacterCardPlayStatus } from "@/lib/characterCardStatus";
 import { LibraryGrid, type LibraryStory, type LibraryCharacter } from "./library";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ type CharacterRow = {
   race: string | null;
   level: number;
   portrait: string | null;
+  data_json: string;
 };
 
 type StoryRow = {
@@ -27,7 +29,7 @@ export default function HomePage() {
   const db = getDb();
   const characters = db
     .prepare<[], CharacterRow>(
-      "SELECT id, name, class, race, level, portrait FROM character ORDER BY updated_at DESC LIMIT 20"
+      "SELECT id, name, class, race, level, portrait, data_json FROM character ORDER BY updated_at DESC LIMIT 20"
     )
     .all();
   const storyRows = db
@@ -59,14 +61,21 @@ export default function HomePage() {
     };
   });
 
-  const charactersForGrid: LibraryCharacter[] = characters.map((c) => ({
-    id: c.id,
-    name: c.name,
-    class: c.class,
-    race: c.race,
-    level: c.level,
-    portrait: c.portrait,
-  }));
+  const charactersForGrid: LibraryCharacter[] = characters.map((c) => {
+    const play = parseCharacterCardPlayStatus(c.data_json);
+    return {
+      id: c.id,
+      name: c.name,
+      class: c.class,
+      race: c.race,
+      level: c.level,
+      portrait: c.portrait ?? play.portraitFromData,
+      hpCurrent: play.hpCurrent,
+      hpMax: play.hpMax,
+      hpTemp: play.hpTemp,
+      ac: play.ac,
+    };
+  });
 
   const tr = serverT;
   return (

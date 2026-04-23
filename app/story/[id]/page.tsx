@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
+import type { BattleMap } from "@/app/story/[id]/map";
 import { getDb, setMeta } from "@/lib/db";
-import { StoryRoom } from "./room";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
+import { StoryRoom, type StoryRoomInitialState } from "./room";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +68,11 @@ export default async function StoryPage({ params }: { params: Promise<{ id: stri
     )
     .all(sessionId);
 
+  const initialState = JSON.parse(session.state_json) as Record<string, unknown>;
+  if (initialState.battleMap && typeof initialState.battleMap === "object") {
+    initialState.battleMap = stripBattleMapDmSecrets(initialState.battleMap as BattleMap);
+  }
+
   return (
     <Shell active="story">
       <StoryRoom
@@ -73,7 +80,7 @@ export default async function StoryPage({ params }: { params: Promise<{ id: stri
         story={story}
         players={characters}
         initialMessages={messages}
-        initialState={JSON.parse(session.state_json)}
+        initialState={initialState as StoryRoomInitialState}
       />
     </Shell>
   );

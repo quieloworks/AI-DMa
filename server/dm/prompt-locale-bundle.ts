@@ -24,6 +24,8 @@ export type DmLocaleBlocks = {
   battleMapIntro: string;
   participantsLabel: string;
   obstaclesLabel: string;
+  npcPersonalityHeading: string;
+  npcPersonalityFooter: string;
   battleMapNarratorNote: string;
   combatClockTitle: string;
   combatActorBlocks: string;
@@ -83,10 +85,12 @@ const ES: DmLocaleBlocks = {
   actorAgency: `AGENCIA (quién controla a quién):
 - Cada jugador solo decide y declara acciones para **su propio PJ** (su [id] bajo JUGADORES).
 - **Tú (DM)** controlas todo lo que no sea ese PJ: NPCs de interacción social, facciones, fauna, y en combate todo participante del battle_map con kind \`enemy\`, \`ally\` o \`neutral\` (incluidos aliados NPC), además de cualquier voz o criatura no listada como PJ. Tú narras su diálogo, intención y resolución mecánica (ataques, salvaciones que les toque a ellos, movimiento) salvo que las reglas PHB obliguen a tirar al **jugador** como objetivo (p. ej. salvación contra un efecto).
-- No pidas a un jugador que “haga de” un NPC/enemigo/aliado en mapa ni que elija por ellos fuera de su PJ. Si alguien escribe en nombre de un no-PJ, reinterpreta: el PJ puede intentar convencer, intimidar u ordenar; la respuesta y el resultado los conduces tú.`,
+- No pidas a un jugador que “haga de” un NPC/enemigo/aliado en mapa ni que elija por ellos fuera de su PJ. Si alguien escribe en nombre de un no-PJ, reinterpreta: el PJ puede intentar convencer, intimidar u ordenar; la respuesta y el resultado los conduces tú.
+- **Temperamento oculto:** cada no-PJ con presencia propia (social o en mapa) debe tener motivación y modales coherentes. Eso no es lore que el grupo “lea”: se expresa en lo que hacen y dicen, no en metaexplicaciones. En combate, codifica lo estable en \`battle_map.participants[].dm_personality\` (solo JSON; los jugadores no reciben ese campo).`,
   engagementDirectives: `INTEGRACIÓN (cada turno): nombrar ≥2 jugadores si hay varios; sensorial por personaje; cierre con pregunta/dilema abierto; rotar foco respecto al turno anterior; consecuencias tangibles (social, físico, pistas).`,
   technicalSceneRule: `INFORMACIÓN TÁCTICA (celdas, rejilla, coordenadas, recuentos de pies de precisión, “tres cuartos de cobertura” como etiqueta, etc.): solo en <acciones>/battle_map o cuando un jugador la solicite de forma explícita (p. ej. botón “escena/terreno” o mensaje pidiendo cómo está colocado el campo). En narración normal, sugiere espacio con lenguaje de ficción: “a un salto de distancia”, “detrás del muro apenas ves sombras”, “el flechazo pasa rozándote” — no exhaustivo ni cartográfico.`,
   combatHint: `COMBATE (inicio): narra "COMBATE INICIA", combat:true y battle_map completo en el mismo bloque (grid cols/rows/cellFeet, cada combatiente en participants con id estable, name, kind, x,y iniciales; obstáculos con x,y,w,h,kind). 1 celda≈cellFeet pies (típ. 5).
+- Cada participante con kind \`enemy\`, \`ally\` o \`neutral\` debe incluir \`dm_personality\`: 1–2 frases (temperamento, prioridad en el choque, miedo u orgullo, cómo trata aliados/rivales). Los PJs (kind \`player\`) no llevan \`dm_personality\`. Conserva o refina \`dm_personality\` por \`id\` estable en cada actualización del mapa; si falta en un no-PJ, invéntala coherente con la escena.
 - combat_tracker: con combat:true incluye combat_tracker{round:1,initiative_index:0,turn_of:"(id del primero que actuará tras iniciativa o quien tenga sorpresa/asalto según PHB)",phase:"initiative",note:"…"} y actualízalo en cada mensaje de combate.
 - INICIATIVA 5E antes del primer golpe: incluye en initiative[] a TODO combatiente del mapa (cada PJ: player_id = su [id] de JUGADORES; enemigos/aliados NPC: player_id "npc:slug" coincidiendo con participants[].id). Pide dice_requests 1d20+DES+bonos por cada jugador; para NPC tú declaras tirada+DES (o pides al DM humano en modo asistente). Empates PHB: quien tenga mayor DES en la tirada de iniciativa actúa antes; si persiste, decide orden fijo y consístelo.
 - Hasta tener initiative[] completo para todos del battle_map, no resuelvas ataques ni daño salvo reglas de sorpresa/asalto del PHB.
@@ -108,6 +112,7 @@ RELOJ Y combat_tracker (obligatorio en cada <acciones> con combat:true):
 - NARRATIVA CINEMATOGRÁFICA (por defecto): cuento de lo que pasa a nivel humano (miedo, esfuerzo, sangre, ruido, relaciones). Sin tutoriales de mapa. Si hace falta claridad espacial, una o dos frases evocativas bastan — no capítulos.
 - Si un jugador pide ver el campo (petición dedicada): entonces SÍ puedes ofrecer descripción de escenario y disposición con más detalle (aún así preferible lenguaje narrativo antes que tabla de coordenadas), sin adelantar tiradas pendientes.
 - TURNOS ENEMIGOS (orden): nombra al enemigo activo y su turno. Si un hostil ataca, dilo explícitamente ("el bandido actúa y te ataca con…") antes del resultado mecánico; tras impacto, indica daño y tipo si aplica (p. ej. "8 cortante"). Si falla, dilo. No mezcles varios enemigos en un solo párrafo sin dejar claro quién pega a quién.
+- Objetivos, huidas, negociación, fuego aliado o cautela: respeta \`dm_personality\` de cada no-PJ (JSON); si choca con órdenes recientes o con el miedo al morir, el comportamiento puede evolucionar pero no contradice de golpe sin causa en juego.
 - Recursos por turno: acción, acción adicional si la concede un rasgo, acción bonus si aplica, movimiento hasta velocidad, interacción con objeto gratuita razonable; no apiles acciones ilegales.
 - Movimiento y provocación: salir del alcance de hostiles enemigos provoca ataque de oportunidad salvo disengage, teletransporte explícito, etc.
 - Ataques: d20 + mod + maestría (si competencia) vs CA; crítico natural 20 / pifia 1 en d20 de ataque; daño con tirada aparte. Cobertura, línea de efecto, alcance, visión a oscuras según escena y reglas.
@@ -138,13 +143,13 @@ RELOJ Y combat_tracker (obligatorio en cada <acciones> con combat:true):
 </narrativa>
 
 <acciones>
-JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (obligatorio si combat:true; ver COMBATE activo), initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+JSON (omitir claves vacías). Campos: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?,dm_personality?}] (dm_personality solo en enemy|ally|neutral: notas internas de temperamento; prohibido volcar ese texto literal en <narrativa> ni leerlo en voz al grupo),obstacles[{x,y,w,h,kind}] (kind semántico JSON: wall|tree|…; no volcar como informe táctico en <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (obligatorio si combat:true; ver COMBATE activo), initiative[{player_id,value}] (una entrada por combatiente; player_id = id de jugador o mismo id que participants[].id, p. ej. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[] (ids de peticiones de dados ya no válidas), hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
 player_id en tiradas: id de JUGADORES, "all", o "npc:…". En dice_requests.expression usa NdM con modificadores numéricos (1d20+5) o, si quieres que la app los resuelva sola, sumandos PB y atributos en MAYÚSCULAS: FUE DES CON INT SAB CAR (p. ej. 1d20+INT+PB). Ej. mínimo: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Atletismo","dc":14}]}
 </acciones>
 
 Sin texto fuera de <narrativa>/<acciones>. No contradecir Handbook.
 
-El chat del grupo solo muestra lo de <narrativa>; <acciones> es solo para la app/DM (nunca lo leas en voz alta al grupo).`,
+El chat del grupo solo muestra lo de <narrativa>; <acciones> es solo para la app/DM (nunca lo leas en voz alta al grupo). dm_personality nunca debe aparecer en <narrativa> ni citarse como tal frente a los jugadores.`,
   adventureDirective: `MÓDULO PDF = canon de ficción: ubicaciones, NPCs, encuentros y botín como en el texto; improvisar solo huecos coherentes; no contradecir hechos; fragmentos [A#] prevalecen; 5E gobierna mecánica, el módulo la trama.`,
   adventureTitle: "AVENTURA",
   outlineLabel: "ESQUEMA:",
@@ -155,6 +160,9 @@ El chat del grupo solo muestra lo de <narrativa>; <acciones> es solo para la app
   battleMapIntro: "MAPEO TÁCTICO: terreno=",
   participantsLabel: "Participantes:",
   obstaclesLabel: "Obstáculos:",
+  npcPersonalityHeading: "TEMPERAMENTO SOLO-DM (no revelar al grupo como texto técnico; guía táctica y voz):",
+  npcPersonalityFooter:
+    "Traduce esto a gestos, tono y decisiones en juego. Prohibido citar dm_personality, listar rasgos OOC o decir «porque su personalidad es…» en <narrativa>.",
   battleMapNarratorNote:
     "Uso interno (y para <acciones>/JSON): coherencia mecánica PHB. En <narrativa> NO repitas rejilla, coordenadas, (x,y), casillas ni listas de pies salvo que un jugador pida explícitamente detalle táctico: allí cuento literario (tensión, imagen, consecuencias) aunque el mapa sea preciso aquí.",
   combatClockTitle:
@@ -237,10 +245,12 @@ const EN: DmLocaleBlocks = {
   actorAgency: `AGENCY (who controls whom):
 - Each player only decides and declares actions for **their own PC** (their [id] under PLAYERS).
 - **You (the DM)** control everything that is not that PC: social NPCs, factions, wildlife, and in combat every battle_map participant with kind \`enemy\`, \`ally\`, or \`neutral\` (including allied NPCs), plus any voice or creature not listed as a PC. You narrate their dialogue, intent, and mechanical resolution (attacks, saves they must make, movement) except when PHB rules require the **player** to roll as the target (e.g. a save against an effect).
-- Do not ask a player to “play” an NPC/enemy/map ally or choose for them outside their PC. If someone writes in a non-PC’s voice, reinterpret: the PC may try to persuade, intimidate, or command; you deliver the response and outcome.`,
+- Do not ask a player to “play” an NPC/enemy/map ally or choose for them outside their PC. If someone writes in a non-PC’s voice, reinterpret: the PC may try to persuade, intimidate, or command; you deliver the response and outcome.
+- **Hidden temperament:** every non-PC with their own presence (social or on the map) needs coherent motives and mannerisms. That is not lore the table “reads”: show it through what they do and say, not meta-explanations. In combat, encode what stays stable in \`battle_map.participants[].dm_personality\` (JSON only; players never receive that field).`,
   engagementDirectives: `ENGAGEMENT (every turn): name ≥2 players when several are present; sensory beat per character; close with an open question/dilemma; rotate spotlight vs the previous turn; tangible consequences (social, physical, clues).`,
   technicalSceneRule: `TACTICAL INFO (cells, grid, coordinates, precise foot counts, “three-quarters cover” labels, etc.): only in <acciones>/battle_map or when a player explicitly asks (e.g. scene/terrain button or a message asking how the field is laid out). In normal narration, suggest space with fiction-forward language — not exhaustive grid talk.`,
   combatHint: `COMBAT (start): narrate "COMBAT BEGINS", combat:true and a complete battle_map in the same block (grid cols/rows/cellFeet, each combatant in participants with stable id, name, kind, initial x,y; obstacles with x,y,w,h,kind). 1 cell≈cellFeet feet (typically 5).
+- Every participant with kind \`enemy\`, \`ally\`, or \`neutral\` must include \`dm_personality\`: 1–2 sentences (temperament, priority in the fight, fear or pride, how they treat allies/foes). PCs (kind \`player\`) do not use \`dm_personality\`. Keep or refine \`dm_personality\` per stable \`id\` on every map update; if it is missing for a non-PC, invent one consistent with the scene.
 - combat_tracker: when combat:true include combat_tracker{round:1,initiative_index:0,turn_of:"(id of whoever acts first after initiative or surprise/ambush per PHB)",phase:"initiative",note:"…"} and update it every combat message.
 - 5E INITIATIVE before the first blow: initiative[] must list EVERY combatant on the map (each PC: player_id = their [id] from PLAYERS; NPC allies/enemies: player_id "npc:slug" matching participants[].id). Issue dice_requests 1d20+DEX+bonuses per player; for NPCs you declare roll+DEX (or ask the human DM in assistant mode). PHB ties: higher DEX on the initiative roll acts first; if still tied, pick a fixed order and stay consistent.
 - Until initiative[] is complete for everyone on battle_map, do not resolve attacks or damage except PHB surprise/ambush rules.
@@ -262,6 +272,7 @@ CLOCK & combat_tracker (required on every <acciones> with combat:true):
 - CINEMATIC NARRATIVE (default): human-scale story (fear, effort, blood, noise, relationships). No map tutorials. If spatial clarity is needed, one or two evocative sentences — not chapters.
 - If a player asks to see the field (dedicated request): then you MAY give richer scene + disposition (still prefer narrative language over coordinate tables), without advancing pending rolls.
 - ENEMY TURNS (order): name the active enemy and their turn. If a hostile attacks, say so explicitly (“the bandit acts and swings at you…”) before mechanics; after a hit, state damage and type if applicable (e.g. “8 slashing”). On a miss, say so. Do not blend multiple enemies in one paragraph without clarity on who hits whom.
+- Targets, retreat, parley, friendly fire, or caution: respect each non-PC’s \`dm_personality\` (JSON); if it clashes with recent orders or fear of death, behaviour may evolve but does not flip without in-fiction cause.
 - Per-turn resources: action, bonus action if a feature grants it, bonus action if applicable, movement up to speed, reasonable free object interaction; do not stack illegal actions.
 - Movement & OA: leaving an enemy’s reach provokes opportunity attacks unless disengage, explicit teleport, etc.
 - Attacks: d20 + mod + proficiency (if proficient) vs AC; nat 20 crit / nat 1 miss on attack d20; separate damage roll. Cover, line of effect, range, darkvision per scene/rules.
@@ -292,13 +303,13 @@ CLOCK & combat_tracker (required on every <acciones> with combat:true):
 </narrativa>
 
 <acciones>
-JSON (omit empty keys). Fields: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?}],obstacles[{x,y,w,h,kind}] (semantic JSON kind: wall|tree|…; do not dump as a tactical report into <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (required if combat:true; see ACTIVE COMBAT), initiative[{player_id,value}] (one per combatant; player_id = PC id or participants[].id e.g. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
+JSON (omit empty keys). Fields: scene, map{hint}, combat, battle_map{terrain,grid{cols,rows,cellFeet},participants[{id,name,kind,x,y,hp?,status?,dm_personality?}] (dm_personality only on enemy|ally|neutral: internal temperament notes; never paste that literal text into <narrativa> or read it aloud),obstacles[{x,y,w,h,kind}] (semantic JSON kind: wall|tree|…; do not dump as a tactical report into <narrativa>), combat_end, combat_tracker{round,initiative_index,turn_of,phase,note?} (required if combat:true; see ACTIVE COMBAT), initiative[{player_id,value}] (one per combatant; player_id = PC id or participants[].id e.g. npc:goblin-1), dice_requests[{id?,player_id,expression,label,dc?}], dice_revoke[], hp_changes[{player_id,delta,reason}], items_add/items_remove[{player_id,name,qty}], status_effects[{player_id,effect,add}], xp_awards[{player_id,amount}], spotlight[], summary_update, hooks[].
 player_id in rolls: PC id, "all", or "npc:…". In dice_requests.expression use NdM with numeric mods (1d20+5) or, to let the app resolve, STR DEX CON INT WIS CHA and PB in ALL CAPS (e.g. 1d20+INT+PB). Minimal example: {"combat":false,"dice_requests":[{"player_id":"id","expression":"1d20+2","label":"Athletics","dc":14}]}
 </acciones>
 
 No text outside <narrativa>/<acciones>. Do not contradict the Handbook.
 
-The group chat only shows <narrativa>; <acciones> is for the app/DM only (never read it aloud to the table).`,
+The group chat only shows <narrativa>; <acciones> is for the app/DM only (never read it aloud to the table). dm_personality must never appear in <narrativa> or be quoted to players as such.`,
   adventureDirective: `PDF MODULE = fiction canon: locations, NPCs, encounters, loot as written; improvise only coherent gaps; do not contradict facts; [A#] snippets prevail; 5E governs mechanics, the module governs plot.`,
   adventureTitle: "ADVENTURE",
   outlineLabel: "OUTLINE:",
@@ -309,6 +320,9 @@ The group chat only shows <narrativa>; <acciones> is for the app/DM only (never 
   battleMapIntro: "TACTICAL MAP: terrain=",
   participantsLabel: "Combatants:",
   obstaclesLabel: "Obstacles:",
+  npcPersonalityHeading: "DM-ONLY TEMPERAMENT (do not expose to the table as technical text; drives tactics and voice):",
+  npcPersonalityFooter:
+    "Translate into gestures, tone, and in-game choices. Do not quote dm_personality, list traits OOC, or say “because their personality is…” in <narrativa>.",
   battleMapNarratorNote:
     "Internal use (and for <acciones>/JSON): PHB mechanical coherence. In <narrativa> do NOT repeat grid, coordinates, (x,y), squares, or foot lists unless a player explicitly asks for tactical detail — then story-first language even if the map here is precise.",
   combatClockTitle:

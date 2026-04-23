@@ -16,6 +16,8 @@ export type SessionBattleMap = {
     y: number;
     hp?: { current: number; max: number };
     status?: string[];
+    /** Notas de temperamento / motivación (solo JSON servidor); no revelar literalmente al grupo. */
+    dm_personality?: string;
   }>;
   obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
 };
@@ -312,7 +314,20 @@ function renderBattleMapSummary(snap: SessionSnapshot): string {
   });
   const tailP = (bm.participants?.length ?? 0) > 28 ? ` …+${(bm.participants?.length ?? 0) - 28} ${L.moreSuffix}` : "";
   const tailO = (bm.obstacles?.length ?? 0) > 20 ? ` …+${(bm.obstacles?.length ?? 0) - 20}` : "";
-  return [head, `${L.participantsLabel} ${parts.join("; ")}${tailP}`, obs.length ? `${L.obstaclesLabel} ${obs.join("; ")}${tailO}` : "", L.battleMapNarratorNote]
+  const personalityLines = (bm.participants ?? [])
+    .filter((p) => p.kind !== "player" && typeof p.dm_personality === "string" && p.dm_personality.trim())
+    .map((p) => `- ${p.name} (${p.id}·${p.kind}): ${p.dm_personality!.trim()}`);
+  const personalityBlock =
+    personalityLines.length > 0
+      ? `\n${L.npcPersonalityHeading}\n${personalityLines.join("\n")}\n${L.npcPersonalityFooter}`
+      : "";
+  return [
+    head,
+    `${L.participantsLabel} ${parts.join("; ")}${tailP}`,
+    obs.length ? `${L.obstaclesLabel} ${obs.join("; ")}${tailO}` : "",
+    personalityBlock,
+    L.battleMapNarratorNote,
+  ]
     .filter(Boolean)
     .join("\n");
 }

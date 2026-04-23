@@ -137,6 +137,10 @@ export const dictionaryEs: Record<string, string> = {
   "library.level": "Nivel",
   "library.noCharsYet": "No has creado personajes todavía.",
   "library.createCharacter": "Crear personaje",
+  "library.cardHp": "PG {{current}}/{{max}}",
+  "library.cardAc": "CA {{ac}}",
+  "library.cardTempHp": "+{{n}} PG temp.",
+  "library.cardNoPlayData": "Completa la ficha para ver PG y CA aquí.",
   "storyNew.badge": "Nueva aventura",
   "storyNew.h1": "Comienza una historia.",
   "storyNew.lead":

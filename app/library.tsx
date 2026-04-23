@@ -23,6 +23,10 @@ export type LibraryCharacter = {
   race: string | null;
   level: number;
   portrait: string | null;
+  hpCurrent: number | null;
+  hpMax: number | null;
+  hpTemp: number | null;
+  ac: number | null;
 };
 
 export function LibraryGrid({
@@ -156,16 +160,16 @@ export function LibraryGrid({
             {characters.map((c) => (
               <div key={c.id} className="card transition" style={{ opacity: busyChar === c.id ? 0.5 : 1 }}>
                 <Link href={`/character/${c.id}`} className="block">
-                  <div className="mb-3 h-20 w-20 rounded-md" style={{ background: "var(--color-bg-tertiary)" }}>
-                    {c.portrait ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.portrait} alt={c.name} className="h-full w-full rounded-md object-cover" />
-                    ) : null}
+                  <div className="flex gap-3">
+                    <CharacterAvatar name={c.name} portraitUrl={c.portrait} />
+                    <div className="min-w-0 flex-1">
+                      <h3 className="mb-0.5 leading-tight">{c.name}</h3>
+                      <p className="text-xs leading-snug" style={{ color: "var(--color-text-hint)" }}>
+                        {c.race ?? tr("common.empty")} · {c.class ?? tr("common.empty")} · {tr("library.level")} {c.level}
+                      </p>
+                      <CharacterCardStatus c={c} tr={tr} />
+                    </div>
                   </div>
-                  <h3 className="mb-0.5">{c.name}</h3>
-                  <p className="text-xs" style={{ color: "var(--color-text-hint)" }}>
-                    {c.race ?? tr("common.empty")} · {c.class ?? tr("common.empty")} · {tr("library.level")} {c.level}
-                  </p>
                 </Link>
                 <div className="mt-3 flex gap-2">
                   <Link
@@ -190,6 +194,103 @@ export function LibraryGrid({
         )}
       </section>
     </>
+  );
+}
+
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  const one = parts[0] ?? "?";
+  return one.slice(0, 2).toUpperCase();
+}
+
+function CharacterAvatar({ name, portraitUrl }: { name: string; portraitUrl: string | null }) {
+  const initials = initialsFromName(name);
+  return (
+    <div
+      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full"
+      style={{
+        background: "var(--color-bg-tertiary)",
+        border: "0.5px solid var(--color-border-strong)",
+        boxShadow: "0 0 0 1px color-mix(in srgb, var(--color-bg-primary) 40%, transparent)",
+      }}
+    >
+      {portraitUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={portraitUrl} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        <span
+          className="flex h-full w-full items-center justify-center text-xs font-medium"
+          style={{ color: "var(--color-accent-text)", fontFamily: "var(--font-display)" }}
+        >
+          {initials}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CharacterCardStatus({
+  c,
+  tr,
+}: {
+  c: LibraryCharacter;
+  tr: (path: string, vars?: Record<string, string | number>) => string;
+}) {
+  const hasHp = c.hpCurrent != null && c.hpMax != null;
+  const hasAc = c.ac != null;
+  const hasTemp = c.hpTemp != null && c.hpTemp > 0;
+  const showHpRow = hasHp || hasTemp;
+  if (!showHpRow && !hasAc) {
+    return (
+      <p className="mt-2 text-[11px] leading-snug" style={{ color: "var(--color-text-hint)" }}>
+        {tr("library.cardNoPlayData")}
+      </p>
+    );
+  }
+
+  let hpRatio: number | null = null;
+  let lowHp = false;
+  if (hasHp && c.hpMax! > 0) {
+    hpRatio = Math.min(1, Math.max(0, c.hpCurrent! / c.hpMax!));
+    lowHp = hpRatio < 0.25;
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {showHpRow ? (
+        <>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium" style={{ color: "var(--color-text-secondary)" }}>
+            {hasHp ? (
+              <span style={{ color: lowHp ? "var(--color-accent-text)" : undefined }}>
+                {tr("library.cardHp", { current: c.hpCurrent!, max: c.hpMax! })}
+              </span>
+            ) : null}
+            {hasTemp ? (
+              <span className="rounded px-1.5 py-px" style={{ background: "var(--color-accent-bg)", color: "var(--color-accent-text)" }}>
+                {tr("library.cardTempHp", { n: c.hpTemp! })}
+              </span>
+            ) : null}
+          </div>
+          {hpRatio != null ? (
+            <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: "var(--color-border)" }}>
+              <div
+                className="h-full rounded-full transition-[width] duration-300"
+                style={{
+                  width: `${Math.round(hpRatio * 100)}%`,
+                  background: lowHp ? "var(--color-accent)" : "color-mix(in srgb, var(--color-text-secondary) 55%, var(--color-accent) 45%)",
+                }}
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {hasAc ? (
+        <p className="text-[11px] font-medium" style={{ color: "var(--color-text-secondary)" }}>
+          {tr("library.cardAc", { ac: c.ac! })}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

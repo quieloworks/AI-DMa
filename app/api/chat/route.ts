@@ -17,6 +17,7 @@ import { retrieveAdventure, getAdventureOutline, hasAdventure } from "@/server/a
 import { applyDmActions } from "@/server/dm/apply-actions";
 import { getDmRagBudget } from "@/server/dm/prompt-budget";
 import { getIo } from "@/server/io-bus";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import type { AppLocale } from "@/lib/i18n/locale";
 import { getGlobalSettings } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/t";
@@ -78,6 +79,7 @@ export async function POST(req: NextRequest) {
     y: number;
     hp?: { current: number; max: number };
     status?: string[];
+    dm_personality?: string;
   };
   type BattleMap = {
     terrain?: string;
@@ -342,6 +344,12 @@ export async function POST(req: NextRequest) {
             const cols = Math.max(6, Math.min(40, Number(gridRaw.cols) || 20));
             const rows = Math.max(6, Math.min(40, Number(gridRaw.rows) || 12));
             const cellFeet = Number(gridRaw.cellFeet) || 5;
+            const prevPersonality = new Map(
+              (nextState.battleMap?.participants ?? []).map((p) => [
+                p.id,
+                (p as BattleParticipant).dm_personality?.trim().slice(0, 400) ?? "",
+              ]),
+            );
             const parts = Array.isArray(bm.participants) ? (bm.participants as Array<Record<string, unknown>>) : [];
             const participants: BattleParticipant[] = parts
               .map((p) => {
@@ -358,14 +366,24 @@ export async function POST(req: NextRequest) {
                         max: Math.max(1, Number(hpRaw.max) || 1),
                       }
                     : undefined;
+                const id = typeof p.id === "string" ? (p.id as string) : "";
+                let dm_personality: string | undefined;
+                if (kind !== "player" && id) {
+                  const incoming =
+                    typeof p.dm_personality === "string" ? p.dm_personality.trim().slice(0, 400) : "";
+                  const inherited = (prevPersonality.get(id) ?? "").trim().slice(0, 400);
+                  const merged = (incoming || inherited).trim();
+                  if (merged) dm_personality = merged;
+                }
                 return {
-                  id: typeof p.id === "string" ? (p.id as string) : "",
+                  id,
                   name: typeof p.name === "string" ? (p.name as string) : "?",
                   kind,
                   x: Math.max(0, Math.min(cols - 1, Math.round(Number(p.x) || 0))),
                   y: Math.max(0, Math.min(rows - 1, Math.round(Number(p.y) || 0))),
                   hp,
                   status: Array.isArray(p.status) ? (p.status as unknown[]).filter((s): s is string => typeof s === "string") : undefined,
+                  ...(dm_personality ? { dm_personality } : {}),
                 };
               })
               .filter((p) => p.id);
@@ -457,7 +475,7 @@ export async function POST(req: NextRequest) {
               io.to(`session:${body.sessionId}`).emit("scene:update", {
                 sessionId: body.sessionId,
                 combat: nextState.combat === true,
-                battleMap: nextState.battleMap ?? null,
+                battleMap: stripBattleMapDmSecrets(nextState.battleMap ?? null),
                 sceneTags: nextState.sceneTags ?? [],
               });
             }

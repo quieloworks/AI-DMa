@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { parseDmResponse, streamingNarrativePreview } from "./parse";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
 import { useLocale, useTranslations } from "@/components/LocaleProvider";
@@ -49,7 +50,7 @@ type AdventureIngest = {
   fileName?: string;
 };
 
-type InitialState = {
+export type StoryRoomInitialState = {
   sceneTags?: string[];
   sceneImage?: string;
   coverImage?: string;
@@ -82,7 +83,7 @@ export function StoryRoom({
   story: Story;
   players: Player[];
   initialMessages: Message[];
-  initialState: InitialState;
+  initialState: StoryRoomInitialState;
 }) {
   const tr = useTranslations();
   const locale = useLocale();
@@ -328,7 +329,7 @@ export function StoryRoom({
       (evt: { sessionId: string; combat?: boolean; battleMap?: BattleMap | null; sceneTags?: string[] }) => {
         if (evt.sessionId !== sessionId) return;
         if (typeof evt.combat === "boolean") setCombat(evt.combat);
-        if (evt.battleMap !== undefined) setBattleMap(evt.battleMap);
+        if (evt.battleMap !== undefined) setBattleMap(stripBattleMapDmSecrets(evt.battleMap));
         if (Array.isArray(evt.sceneTags) && evt.sceneTags[0]) setSceneHint(evt.sceneTags[0]);
         setTurnCounter((t) => t + 1);
       }
@@ -419,7 +420,7 @@ export function StoryRoom({
         if (actObj?.battle_map && typeof actObj.battle_map === "object" && !Array.isArray(actObj.battle_map)) {
           try {
             const bm = actObj.battle_map as BattleMap;
-            setBattleMap(bm);
+            setBattleMap(stripBattleMapDmSecrets(bm));
           } catch {}
         }
         if (!nextCombat) setBattleMap(null);

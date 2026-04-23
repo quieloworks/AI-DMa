@@ -139,6 +139,10 @@ export const dictionaryEn: Record<string, string> = {
   "library.level": "Level",
   "library.noCharsYet": "You have not created any characters yet.",
   "library.createCharacter": "Create character",
+  "library.cardHp": "HP {{current}}/{{max}}",
+  "library.cardAc": "AC {{ac}}",
+  "library.cardTempHp": "+{{n}} temp HP",
+  "library.cardNoPlayData": "Finish the sheet to show HP and AC here.",
   "storyNew.badge": "New adventure",
   "storyNew.h1": "Start a story.",
   "storyNew.lead":
