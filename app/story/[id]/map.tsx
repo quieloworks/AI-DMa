@@ -142,12 +142,18 @@ export function BattleMapCanvas({
   battleMap,
   turn,
   reach,
+  showBlockedOverlay,
+  selectedCell,
   onCellTap,
 }: {
   battleMap: BattleMap;
   turn?: number;
-  /** Celdas `"gx,gy"` resaltadas (p. ej. movimiento permitido). */
+  /** Celdas `"gx,gy"` alcanzables (mismo coste que usa pathfinding). */
   reach?: Set<string> | null;
+  /** Si true y hay `reach`, pinta toda la rejilla: verde alcanzable / rojo no alcanzable. */
+  showBlockedOverlay?: boolean;
+  /** Casilla elegida en preview (borde). */
+  selectedCell?: { x: number; y: number } | null;
   onCellTap?: (gx: number, gy: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,7 +211,18 @@ export function BattleMapCanvas({
     }
     ctx.globalAlpha = 1;
 
-    if (reach && reach.size > 0) {
+    if (showBlockedOverlay && reach) {
+      for (let gy = 0; gy < rows; gy++) {
+        for (let gx = 0; gx < cols; gx++) {
+          const key = `${gx},${gy}`;
+          const inReach = reach.has(key);
+          ctx.fillStyle = inReach ? "rgba(29,158,117,0.2)" : "rgba(210,80,60,0.14)";
+          const rx = ox + gx * cellSize;
+          const ry = oy + gy * cellSize;
+          ctx.fillRect(rx + 1, ry + 1, cellSize - 2, cellSize - 2);
+        }
+      }
+    } else if (reach && reach.size > 0) {
       ctx.fillStyle = "rgba(29,158,117,0.22)";
       for (const key of reach) {
         const parts = key.split(",").map((n) => Number(n.trim()));
@@ -288,6 +305,22 @@ export function BattleMapCanvas({
       ctx.fillText(label, cx, cy + radius + (p.hp ? 18 : 12));
     }
 
+    if (
+      selectedCell &&
+      Number.isFinite(selectedCell.x) &&
+      Number.isFinite(selectedCell.y) &&
+      selectedCell.x >= 0 &&
+      selectedCell.x < cols &&
+      selectedCell.y >= 0 &&
+      selectedCell.y < rows
+    ) {
+      const sx = ox + selectedCell.x * cellSize;
+      const sy = oy + selectedCell.y * cellSize;
+      ctx.strokeStyle = "rgba(250, 232, 180, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx + 0.5, sy + 0.5, cellSize - 1, cellSize - 1);
+    }
+
     ctx.fillStyle = "rgba(244,239,230,0.65)";
     ctx.font = "italic 12px 'Instrument Serif', serif";
     ctx.textAlign = "left";
@@ -317,7 +350,7 @@ export function BattleMapCanvas({
       ctx.fillText(item.label, legendX + 12, legendY);
       legendX += ctx.measureText(item.label).width + 28;
     }
-  }, [battleMap, turn, tr, reach]);
+  }, [battleMap, turn, tr, reach, showBlockedOverlay, selectedCell]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

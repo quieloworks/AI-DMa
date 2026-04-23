@@ -10,9 +10,11 @@ import { useLocale, useTranslations } from "@/components/LocaleProvider";
 import { localizeGamePhrase, localizedAbilityAbbrev, localizedSkillLabel } from "@/lib/i18n/game-localize";
 import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import type { BattleMap } from "@/lib/battle-map-types";
-import { coerceCombatTracker, type SessionCombatTracker } from "@/lib/session-combat-tracker";
+import { coerceCombatTracker, phaseAllowsPlayerMapMove, type SessionCombatTracker } from "@/lib/session-combat-tracker";
+import { findPlayerParticipantForSession } from "@/lib/map-participant-for-player";
 import { reachableCells } from "@/lib/tactical-path";
 import { BattleMapCanvas } from "@/app/story/[id]/map";
+import { InitiativeQueuePanel } from "@/components/InitiativeQueuePanel";
 
 type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
 
@@ -39,6 +41,7 @@ type CharData = {
 
 type Player = {
   player_id: string;
+  character_id: string;
   token: string;
   character: { name: string; class: string | null; race: string | null; level: number; data: CharData } | null;
 };
@@ -165,6 +168,8 @@ export function PlayRoom({
     coerceCombatTracker(initialCombatTracker ?? null)
   );
   const [initiative, setInitiative] = useState<InitiativeRow[]>(() => initialInitiative ?? []);
+  const [movementPlanning, setMovementPlanning] = useState(false);
+  const [movementDraft, setMovementDraft] = useState<{ x: number; y: number } | null>(null);
   const [actionToast, setActionToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -230,22 +235,37 @@ export function PlayRoom({
     if (tab === "mapa" && (!battleMap || !inCombat)) setTab("personaje");
   }, [tab, battleMap, inCombat]);
 
+  useEffect(() => {
+    if (!inCombat || tab !== "mapa") {
+      setMovementPlanning(false);
+      setMovementDraft(null);
+    }
+  }, [inCombat, tab]);
+
+  const resolvedParticipant = useMemo(() => {
+    if (!battleMap || !picked) return null;
+    return findPlayerParticipantForSession(battleMap, picked.player_id, picked.character_id);
+  }, [battleMap, picked]);
+
   const mapReach = useMemo(() => {
-    if (!battleMap || !picked || !combatTracker) return null;
+    if (!battleMap || !picked || !combatTracker || !resolvedParticipant) return null;
     const canMoveHere =
       inCombat &&
       storyMode === "auto" &&
       combatTracker.turn_of === picked.player_id &&
-      combatTracker.phase === "turn_open";
+      phaseAllowsPlayerMapMove(combatTracker.phase);
     if (!canMoveHere) return null;
-    const me = battleMap.participants.find((p) => p.id === picked.player_id && p.kind === "player");
-    if (!me) return null;
     const budget =
       typeof combatTracker.movement_remaining_feet === "number" && Number.isFinite(combatTracker.movement_remaining_feet)
         ? Math.max(0, Math.floor(combatTracker.movement_remaining_feet))
         : speed;
-    return reachableCells(battleMap, { x: me.x, y: me.y }, budget, picked.player_id);
-  }, [battleMap, picked, combatTracker, inCombat, storyMode, speed]);
+    return reachableCells(battleMap, { x: resolvedParticipant.x, y: resolvedParticipant.y }, budget, resolvedParticipant.id);
+  }, [battleMap, picked, combatTracker, inCombat, storyMode, speed, resolvedParticipant]);
+
+  const myTurnOnMap = useMemo(() => {
+    if (!picked || !combatTracker) return false;
+    return inCombat && storyMode === "auto" && combatTracker.turn_of === picked.player_id;
+  }, [picked, combatTracker, inCombat, storyMode]);
 
   const submitTacticalMove = useCallback(
     async (gx: number, gy: number) => {
@@ -268,6 +288,8 @@ export function PlayRoom({
         }
         if (data.battleMap) setBattleMap(stripBattleMapDmSecrets(data.battleMap));
         if (data.combatTracker) setCombatTracker(data.combatTracker);
+        setMovementPlanning(false);
+        setMovementDraft(null);
         flashToast(tr("play.mapMovedOk"));
       } catch (e) {
         flashToast(tr("play.mapMoveFailed", { msg: (e as Error).message }));
@@ -276,22 +298,41 @@ export function PlayRoom({
     [picked, battleMap, sessionId, flashToast, tr]
   );
 
-  const handleMapCellTap = useCallback(
+  const handleMapCellWhilePlanning = useCallback(
     (gx: number, gy: number) => {
-      if (!mapReach?.has(`${gx},${gy}`)) {
-        if (mapReach) flashToast(tr("play.mapMoveDenied"));
+      if (!movementPlanning || !mapReach) return;
+      const key = `${gx},${gy}`;
+      if (!mapReach.has(key)) {
+        flashToast(tr("play.mapMoveDenied"));
         return;
       }
-      void submitTacticalMove(gx, gy);
+      setMovementDraft({ x: gx, y: gy });
     },
-    [mapReach, submitTacticalMove, flashToast, tr]
+    [movementPlanning, mapReach, flashToast, tr]
   );
+
+  const confirmDraftMove = useCallback(() => {
+    if (!movementDraft || !resolvedParticipant) return;
+    if (movementDraft.x === resolvedParticipant.x && movementDraft.y === resolvedParticipant.y) return;
+    void submitTacticalMove(movementDraft.x, movementDraft.y);
+  }, [movementDraft, resolvedParticipant, submitTacticalMove]);
 
   const turnActorLabel = useMemo(() => {
     if (!combatTracker || !battleMap) return "";
     const tok = battleMap.participants.find((p) => p.id === combatTracker.turn_of);
     return tok?.name ?? combatTracker.turn_of;
   }, [combatTracker, battleMap]);
+
+  const initiativePlayersById = useMemo(
+    () =>
+      Object.fromEntries(
+        players.map((p) => [
+          p.player_id,
+          { playerId: p.player_id, character: p.character ? { name: p.character.name } : null },
+        ]),
+      ),
+    [players],
+  );
 
   useEffect(() => {
     if (!picked) return;
@@ -933,19 +974,38 @@ export function PlayRoom({
               <div className="mb-2 shrink-0 space-y-1 px-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
                 <p>
                   {tr("play.mapBannerRound", { n: combatTracker.round })}
-                  {initiative.length > 0 ? ` · ${combatTracker.phase}` : ""}
+                  {` · ${combatTracker.phase}`}
                 </p>
-                {mapReach ? (
-                  <p style={{ color: "var(--color-accent)" }}>{tr("play.mapYourTurn")}</p>
-                ) : (
+                {myTurnOnMap && !resolvedParticipant && (
+                  <p style={{ color: "#e0a43a" }}>{tr("play.mapTokenMismatch")}</p>
+                )}
+                {myTurnOnMap && resolvedParticipant && !phaseAllowsPlayerMapMove(combatTracker.phase) && (
+                  <p style={{ color: "var(--color-text-hint)" }}>{tr("play.mapPhaseBlocked", { phase: combatTracker.phase })}</p>
+                )}
+                {myTurnOnMap && mapReach && !movementPlanning && (
+                  <p style={{ color: "var(--color-accent)" }}>{tr("play.mapHintPrepare")}</p>
+                )}
+                {movementPlanning && mapReach && (
+                  <p style={{ color: "var(--color-accent)" }}>{tr("play.mapHintSelectConfirm")}</p>
+                )}
+                {!myTurnOnMap && (
                   <p style={{ color: "var(--color-text-hint)" }}>
                     {tr("play.mapNotYourTurn", { name: turnActorLabel, phase: combatTracker.phase })}
                   </p>
                 )}
-                {typeof combatTracker.movement_remaining_feet === "number" && (
+                {typeof combatTracker.movement_remaining_feet === "number" && myTurnOnMap && (
                   <p>{tr("play.mapMoveFeetLeft", { n: combatTracker.movement_remaining_feet })}</p>
                 )}
               </div>
+            )}
+            {inCombat && initiative.length > 0 && combatTracker && (
+              <InitiativeQueuePanel
+                initiative={initiative}
+                combatTracker={combatTracker}
+                battleMap={battleMap}
+                playersById={initiativePlayersById}
+                variant="compact"
+              />
             )}
             <div
               className="min-h-0 flex-1 overflow-hidden rounded-md"
@@ -955,9 +1015,89 @@ export function PlayRoom({
                 battleMap={battleMap}
                 turn={combatTracker?.round}
                 reach={mapReach}
-                onCellTap={mapReach ? handleMapCellTap : undefined}
+                showBlockedOverlay={movementPlanning && !!mapReach}
+                selectedCell={movementDraft}
+                onCellTap={movementPlanning && mapReach ? handleMapCellWhilePlanning : undefined}
               />
             </div>
+            {mapReach && (
+              <div className="mt-2 flex shrink-0 flex-col gap-2">
+                {!movementPlanning ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-md px-3 py-2 text-xs"
+                    style={{
+                      background: "var(--color-accent)",
+                      color: "white",
+                      border: "none",
+                    }}
+                    onClick={() => {
+                      setMovementPlanning(true);
+                      setMovementDraft(null);
+                    }}
+                  >
+                    {tr("play.mapPrepareMovement")}
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="flex-1 rounded-md px-3 py-2 text-xs"
+                        style={{
+                          background: "var(--color-accent)",
+                          color: "white",
+                          border: "none",
+                          opacity:
+                            movementDraft &&
+                            resolvedParticipant &&
+                            (movementDraft.x !== resolvedParticipant.x || movementDraft.y !== resolvedParticipant.y)
+                              ? 1
+                              : 0.45,
+                        }}
+                        disabled={
+                          !movementDraft ||
+                          !resolvedParticipant ||
+                          (movementDraft.x === resolvedParticipant.x && movementDraft.y === resolvedParticipant.y)
+                        }
+                        onClick={() => confirmDraftMove()}
+                      >
+                        {tr("play.mapConfirmMove")}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 rounded-md px-3 py-2 text-xs"
+                        style={{
+                          border: "0.5px solid var(--color-border-strong)",
+                          color: "var(--color-text-primary)",
+                          background: "var(--color-bg-tertiary)",
+                        }}
+                        onClick={() => {
+                          setMovementDraft(null);
+                        }}
+                      >
+                        {tr("play.mapUndoSelection")}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="w-full rounded-md px-3 py-2 text-xs"
+                      style={{
+                        border: "0.5px solid var(--color-border)",
+                        color: "var(--color-text-secondary)",
+                        background: "transparent",
+                      }}
+                      onClick={() => {
+                        setMovementPlanning(false);
+                        setMovementDraft(null);
+                      }}
+                    >
+                      {tr("play.mapExitPrepare")}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>

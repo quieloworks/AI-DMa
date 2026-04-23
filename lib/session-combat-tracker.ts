@@ -4,6 +4,8 @@ export type CombatTrackerPhase =
   | "awaiting_dice"
   | "same_turn_resolution"
   | "turn_open"
+  /** Declaración de movimiento en mapa (app móvil); el DM puede usar esta fase antes de acciones/ataques. */
+  | "player_movement"
   | "between_actors";
 
 /** Estado explícito del reloj de batalla; lo emite el DM en <acciones> y la app lo persiste. */
@@ -22,8 +24,14 @@ const COMBAT_TRACKER_PHASES = new Set<string>([
   "awaiting_dice",
   "same_turn_resolution",
   "turn_open",
+  "player_movement",
   "between_actors",
 ]);
+
+/** Fases en las que el PJ puede usar el mapa táctico (preparar/confirmar movimiento). */
+export function phaseAllowsPlayerMapMove(phase: CombatTrackerPhase): boolean {
+  return phase === "turn_open" || phase === "player_movement";
+}
 
 /** Normaliza combat_tracker del JSON del modelo; null = ausente o inválido. */
 export function coerceCombatTracker(raw: unknown): SessionCombatTracker | null {

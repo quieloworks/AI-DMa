@@ -39,7 +39,10 @@ export default async function PlayPage({
         "SELECT name, class, race, level, data_json FROM character WHERE id = ?"
       )
       .get(p.character_id);
-    return { ...p, character: c ? { name: c.name, class: c.class, race: c.race, level: c.level, data: JSON.parse(c.data_json) } : null };
+    return {
+      ...p,
+      character: c ? { name: c.name, class: c.class, race: c.race, level: c.level, data: JSON.parse(c.data_json) } : null,
+    };
   });
 
   let initialCombat = false;

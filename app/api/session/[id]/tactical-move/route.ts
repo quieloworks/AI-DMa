@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getIo } from "@/server/io-bus";
-import type { SessionCombatTracker } from "@/lib/session-combat-tracker";
+import { phaseAllowsPlayerMapMove, type SessionCombatTracker } from "@/lib/session-combat-tracker";
+import { findPlayerParticipantForSession } from "@/lib/map-participant-for-player";
 import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import type { BattleMap } from "@/lib/battle-map-types";
 import { movementCostFeet } from "@/lib/tactical-path";
@@ -86,13 +87,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (ct.turn_of !== playerId) {
     return NextResponse.json({ error: serverT("tacticalMove.notYourTurn") }, { status: 403 });
   }
-  if (ct.phase !== "turn_open") {
+  if (!phaseAllowsPlayerMapMove(ct.phase)) {
     return NextResponse.json({ error: serverT("tacticalMove.phaseBlocked") }, { status: 409 });
   }
 
   const bm = state.battleMap;
-  const me = bm.participants.find((p) => p.id === playerId && p.kind === "player");
-  if (!me) {
+  const tokenP = findPlayerParticipantForSession(bm, playerId, row.character_id);
+  if (!tokenP) {
     return NextResponse.json({ error: serverT("tacticalMove.noTokenOnMap") }, { status: 409 });
   }
 
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) {
     return NextResponse.json({ error: serverT("tacticalMove.outOfBounds") }, { status: 400 });
   }
-  if (gx === me.x && gy === me.y) {
+  if (gx === tokenP.x && gy === tokenP.y) {
     return NextResponse.json({ ok: true, battleMap: stripBattleMapDmSecrets(bm), combatTracker: ct });
   }
 
@@ -114,12 +115,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       ? Math.max(0, Math.floor(ct.movement_remaining_feet))
       : speed;
 
-  const cost = movementCostFeet(bm, { x: me.x, y: me.y }, { x: gx, y: gy }, playerId);
+  const moverId = tokenP.id;
+  const cost = movementCostFeet(bm, { x: tokenP.x, y: tokenP.y }, { x: gx, y: gy }, moverId);
   if (cost === null || cost > budget) {
     return NextResponse.json({ error: serverT("tacticalMove.moveTooFar") }, { status: 400 });
   }
 
-  const nextParticipants = bm.participants.map((p) => (p.id === playerId ? { ...p, x: gx, y: gy } : p));
+  const nextParticipants = bm.participants.map((p) => (p.id === moverId ? { ...p, x: gx, y: gy } : p));
   const nextBm: BattleMap = { ...bm, participants: nextParticipants };
   const remaining = Math.max(0, budget - cost);
   const nextCt: SessionCombatTracker = { ...ct, movement_remaining_feet: remaining };

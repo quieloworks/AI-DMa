@@ -207,6 +207,7 @@ function combatPhaseLabelLocalized(phase: CombatTrackerPhase, locale: AppLocale 
     same_turn_resolution:
       "cerrando el mismo turno (p. ej. daño tras impacto, salvaciones del mismo ataque)",
     turn_open: "turno activo: el actor puede declarar movimiento/acción sin dado bloqueante pendiente",
+    player_movement: "declaración de movimiento en mapa (PJ coloca ficha en la app antes de acción/ataque)",
     between_actors: "puente narrativo entre combatientes (no consumas aún el turno del siguiente)",
   };
   const en: Record<CombatTrackerPhase, string> = {
@@ -215,6 +216,7 @@ function combatPhaseLabelLocalized(phase: CombatTrackerPhase, locale: AppLocale 
     same_turn_resolution:
       "resolving the same turn (e.g. damage after a hit, saves from the same attack)",
     turn_open: "active turn: the actor may declare movement/action with no blocking roll pending",
+    player_movement: "map movement declaration (PC places token in the app before action/attack)",
     between_actors: "brief narrative bridge between combatants (do not advance the next turn yet)",
   };
   const map = normalizeLocale(locale) === "en" ? en : es;
@@ -238,6 +240,7 @@ function renderCombatTracker(snap: SessionSnapshot): string {
     L.combatClockTitle,
     `${L.combatRoundPrefix} ${t.round}${L.combatPhaseMid} ${combatPhaseLabelLocalized(t.phase, snap.locale)} [phase=${t.phase}]`,
     `${L.combatActorBlocks} ${cur} (turn_of=${t.turn_of}) · initiative_index=${t.initiative_index} ${L.initiativeIndexHint}`,
+    L.combatStrictTurnReminder,
     t.note ? `${L.combatPendingExplicit} ${t.note}` : L.combatPendingGeneric,
     sorted.length ? `${L.combatQueueComplete} ${ordered}` : L.combatQueueMissing,
     nextLine,

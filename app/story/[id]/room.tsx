@@ -7,6 +7,7 @@ import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import { coerceCombatTracker, type SessionCombatTracker } from "@/lib/session-combat-tracker";
 import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
+import { InitiativeQueuePanel } from "@/components/InitiativeQueuePanel";
 import { useLocale, useTranslations } from "@/components/LocaleProvider";
 
 type Difficulty = "facil" | "medio" | "dificil" | "experto";
@@ -803,10 +804,20 @@ export function StoryRoom({
           />
         )}
 
-        <div
-          className="relative overflow-hidden rounded-lg"
-          style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-secondary)", minHeight: 420 }}
-        >
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-3">
+          {combat && battleMap && initiative.length > 0 && combatTracker && (
+            <InitiativeQueuePanel
+              initiative={initiative}
+              combatTracker={combatTracker}
+              battleMap={battleMap}
+              playersById={playerMap}
+              variant="sidebar"
+            />
+          )}
+          <div
+            className="relative min-h-[420px] min-w-0 flex-1 overflow-hidden rounded-lg"
+            style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-secondary)" }}
+          >
           {combat && battleMap ? (
             <BattleMapCanvas battleMap={battleMap} turn={turnCounter} />
           ) : combat ? (
@@ -896,6 +907,7 @@ export function StoryRoom({
               {tr("storyRoom.imageErrorHint")}
             </div>
           )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
