@@ -2,29 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { useTranslations } from "@/components/LocaleProvider";
+import type { BattleMap, BattleParticipant } from "@/lib/battle-map-types";
+
+export type { BattleMap, BattleParticipant } from "@/lib/battle-map-types";
 
 type Player = {
   playerId: string;
   character: { name: string } | null;
-};
-
-export type BattleParticipant = {
-  id: string;
-  name: string;
-  kind: "player" | "ally" | "enemy" | "neutral";
-  x: number;
-  y: number;
-  hp?: { current: number; max: number };
-  status?: string[];
-  /** Solo DM / modelo: temperamento y prioridades; nunca se envía a jugadores (véase stripBattleMapDmSecrets). */
-  dm_personality?: string;
-};
-
-export type BattleMap = {
-  terrain?: string;
-  grid: { cols: number; rows: number; cellFeet?: number };
-  participants: BattleParticipant[];
-  obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
 };
 
 type PaletteTerrainId =
@@ -157,11 +141,17 @@ export function MapCanvas({ hint, players }: { hint: string; players: Player[] }
 export function BattleMapCanvas({
   battleMap,
   turn,
+  reach,
+  onCellTap,
 }: {
   battleMap: BattleMap;
   turn?: number;
+  /** Celdas `"gx,gy"` resaltadas (p. ej. movimiento permitido). */
+  reach?: Set<string> | null;
+  onCellTap?: (gx: number, gy: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const layoutRef = useRef({ ox: 0, oy: 0, cellSize: 20, cols: 8, rows: 8 });
   const tr = useTranslations();
 
   useEffect(() => {
@@ -184,6 +174,8 @@ export function BattleMapCanvas({
     const gridH = cellSize * rows;
     const ox = pad + (available.w - gridW) / 2;
     const oy = pad + (available.h - gridH) / 2;
+
+    layoutRef.current = { ox, oy, cellSize, cols, rows };
 
     const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
     bgGrad.addColorStop(0, palette.bg);
@@ -212,6 +204,20 @@ export function BattleMapCanvas({
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+
+    if (reach && reach.size > 0) {
+      ctx.fillStyle = "rgba(29,158,117,0.22)";
+      for (const key of reach) {
+        const parts = key.split(",").map((n) => Number(n.trim()));
+        const gx = parts[0];
+        const gy = parts[1];
+        if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+        if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) continue;
+        const rx = ox + gx * cellSize;
+        const ry = oy + gy * cellSize;
+        ctx.fillRect(rx + 1, ry + 1, cellSize - 2, cellSize - 2);
+      }
+    }
 
     for (const ob of battleMap.obstacles ?? []) {
       const colors = OBSTACLE_COLORS[ob.kind ?? "cover"] ?? OBSTACLE_COLORS.cover;
@@ -311,7 +317,35 @@ export function BattleMapCanvas({
       ctx.fillText(item.label, legendX + 12, legendY);
       legendX += ctx.measureText(item.label).width + 28;
     }
-  }, [battleMap, turn, tr]);
+  }, [battleMap, turn, tr, reach]);
 
-  return <canvas ref={canvasRef} className="h-full w-full" style={{ display: "block", minHeight: 420 }} />;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !onCellTap) return;
+    const handler = (e: PointerEvent) => {
+      const L = layoutRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const lx = e.clientX - rect.left;
+      const ly = e.clientY - rect.top;
+      const gx = Math.floor((lx - L.ox) / L.cellSize);
+      const gy = Math.floor((ly - L.oy) / L.cellSize);
+      if (gx < 0 || gx >= L.cols || gy < 0 || gy >= L.rows) return;
+      onCellTap(gx, gy);
+    };
+    canvas.style.touchAction = "none";
+    canvas.addEventListener("pointerdown", handler);
+    return () => canvas.removeEventListener("pointerdown", handler);
+  }, [onCellTap, battleMap]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="h-full w-full"
+      style={{
+        display: "block",
+        minHeight: 420,
+        cursor: onCellTap ? "pointer" : undefined,
+      }}
+    />
+  );
 }

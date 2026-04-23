@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { parseDmResponse, streamingNarrativePreview } from "./parse";
 import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
+import { coerceCombatTracker, type SessionCombatTracker } from "@/lib/session-combat-tracker";
 import { MapCanvas, BattleMapCanvas, type BattleMap } from "./map";
 import { QrPanel } from "./qr";
 import { useLocale, useTranslations } from "@/components/LocaleProvider";
@@ -50,6 +51,8 @@ type AdventureIngest = {
   fileName?: string;
 };
 
+export type InitiativeRow = { player_id: string; value: number };
+
 export type StoryRoomInitialState = {
   sceneTags?: string[];
   sceneImage?: string;
@@ -60,6 +63,8 @@ export type StoryRoomInitialState = {
   autoSpeak?: boolean;
   combat?: boolean;
   battleMap?: BattleMap | null;
+  combatTracker?: SessionCombatTracker | null;
+  initiative?: InitiativeRow[];
   adventureIngest?: AdventureIngest;
 };
 
@@ -117,6 +122,12 @@ export function StoryRoom({
   const [imageError, setImageError] = useState<string | null>(null);
   const [combat, setCombat] = useState<boolean>(initialState.combat === true);
   const [battleMap, setBattleMap] = useState<BattleMap | null>(initialState.battleMap ?? null);
+  const [combatTracker, setCombatTracker] = useState<SessionCombatTracker | null>(() =>
+    coerceCombatTracker(initialState.combatTracker ?? null)
+  );
+  const [initiative, setInitiative] = useState<InitiativeRow[]>(() =>
+    Array.isArray(initialState.initiative) ? (initialState.initiative as InitiativeRow[]) : []
+  );
   const [turnCounter, setTurnCounter] = useState(0);
   const [tone, setTone] = useState<number>(() =>
     typeof initialState.tone === "number" ? Math.max(0, Math.min(100, initialState.tone)) : 50
@@ -326,10 +337,19 @@ export function StoryRoom({
     });
     s.on(
       "scene:update",
-      (evt: { sessionId: string; combat?: boolean; battleMap?: BattleMap | null; sceneTags?: string[] }) => {
+      (evt: {
+        sessionId: string;
+        combat?: boolean;
+        battleMap?: BattleMap | null;
+        combatTracker?: SessionCombatTracker | null;
+        initiative?: InitiativeRow[];
+        sceneTags?: string[];
+      }) => {
         if (evt.sessionId !== sessionId) return;
         if (typeof evt.combat === "boolean") setCombat(evt.combat);
         if (evt.battleMap !== undefined) setBattleMap(stripBattleMapDmSecrets(evt.battleMap));
+        if (evt.combatTracker !== undefined) setCombatTracker(evt.combatTracker ? coerceCombatTracker(evt.combatTracker) : null);
+        if (evt.initiative !== undefined) setInitiative(Array.isArray(evt.initiative) ? evt.initiative : []);
         if (Array.isArray(evt.sceneTags) && evt.sceneTags[0]) setSceneHint(evt.sceneTags[0]);
         setTurnCounter((t) => t + 1);
       }
@@ -423,7 +443,16 @@ export function StoryRoom({
             setBattleMap(stripBattleMapDmSecrets(bm));
           } catch {}
         }
-        if (!nextCombat) setBattleMap(null);
+        if (Array.isArray(actObj?.initiative)) {
+          setInitiative(actObj.initiative as InitiativeRow[]);
+        }
+        const ctParsed = coerceCombatTracker(actObj?.combat_tracker);
+        if (ctParsed) setCombatTracker(ctParsed);
+        if (!nextCombat) {
+          setBattleMap(null);
+          setCombatTracker(null);
+          setInitiative([]);
+        }
         setTurnCounter((t) => t + 1);
 
         const clean = parsed.narrative.replace(/\[emocion:[^\]]+\]/gi, "").trim();
@@ -707,6 +736,58 @@ export function StoryRoom({
         </div>
 
         {ingest && <AdventureIngestBanner ingest={ingest} />}
+
+        {combat && combatTracker && initiative.length > 0 && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-2 rounded-md px-3 py-2 text-xs"
+            style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-tertiary)" }}
+          >
+            <span style={{ color: "var(--color-text-secondary)" }}>{tr("storyRoom.combatBar.round", { n: combatTracker.round })}</span>
+            <span style={{ color: "var(--color-text-hint)" }}>·</span>
+            <span style={{ color: "var(--color-text-primary)" }}>
+              {tr("storyRoom.combatBar.turnOf", {
+                name: (() => {
+                  const pl = playerMap[combatTracker.turn_of];
+                  if (pl?.character?.name) return pl.character.name;
+                  const tok = battleMap?.participants.find((p) => p.id === combatTracker.turn_of);
+                  return tok?.name ?? combatTracker.turn_of;
+                })(),
+              })}
+            </span>
+            <span style={{ color: "var(--color-text-hint)" }}>·</span>
+            <span style={{ color: "var(--color-text-hint)" }}>{combatTracker.phase}</span>
+            {typeof combatTracker.movement_remaining_feet === "number" && (
+              <>
+                <span style={{ color: "var(--color-text-hint)" }}>·</span>
+                <span style={{ color: "var(--color-text-secondary)" }}>
+                  {tr("storyRoom.combatBar.moveFeet", { n: combatTracker.movement_remaining_feet })}
+                </span>
+              </>
+            )}
+            <span className="grow" />
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs"
+              style={{ border: "0.5px solid var(--color-border-strong)", color: "var(--color-text-primary)" }}
+              disabled={streaming}
+              onClick={() => {
+                void (async () => {
+                  try {
+                    const res = await fetch(`/api/session/${sessionId}/combat-advance`, { method: "POST" });
+                    if (!res.ok) {
+                      const j = (await res.json().catch(() => ({}))) as { error?: string };
+                      console.warn("combat-advance:", j.error ?? res.status);
+                    }
+                  } catch (e) {
+                    console.warn("combat-advance:", (e as Error).message);
+                  }
+                })();
+              }}
+            >
+              {tr("storyRoom.combatBar.nextTurn")}
+            </button>
+          </div>
+        )}
 
         {showQr && <QrPanel sessionId={sessionId} players={players} />}
 

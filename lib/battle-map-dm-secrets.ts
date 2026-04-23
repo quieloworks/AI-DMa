@@ -1,4 +1,4 @@
-import type { BattleMap } from "@/app/story/[id]/map";
+import type { BattleMap } from "@/lib/battle-map-types";
 
 /** Quita campos solo-DM del mapa antes de enviarlos a clientes o APIs públicas. */
 export function stripBattleMapDmSecrets(map: BattleMap | null): BattleMap | null {

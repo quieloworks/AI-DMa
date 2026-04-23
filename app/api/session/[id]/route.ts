@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { BattleMap } from "@/app/story/[id]/map";
+import type { BattleMap } from "@/lib/battle-map-types";
 import { getDb } from "@/lib/db";
 import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import { serverT } from "@/lib/i18n/server";

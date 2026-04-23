@@ -476,6 +476,8 @@ export async function POST(req: NextRequest) {
                 sessionId: body.sessionId,
                 combat: nextState.combat === true,
                 battleMap: stripBattleMapDmSecrets(nextState.battleMap ?? null),
+                combatTracker: nextState.combatTracker ?? null,
+                initiative: Array.isArray(nextState.initiative) ? nextState.initiative : [],
                 sceneTags: nextState.sceneTags ?? [],
               });
             }

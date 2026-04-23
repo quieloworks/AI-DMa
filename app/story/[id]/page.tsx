@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
-import type { BattleMap } from "@/app/story/[id]/map";
+import type { BattleMap } from "@/lib/battle-map-types";
 import { getDb, setMeta } from "@/lib/db";
 import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
 import { StoryRoom, type StoryRoomInitialState } from "./room";

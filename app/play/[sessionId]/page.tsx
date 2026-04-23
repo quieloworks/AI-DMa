@@ -1,5 +1,8 @@
 import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
+import type { BattleMap } from "@/lib/battle-map-types";
+import { coerceCombatTracker } from "@/lib/session-combat-tracker";
 import { PlayRoom } from "./room";
 import { getGlobalSettings } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/t";
@@ -40,9 +43,20 @@ export default async function PlayPage({
   });
 
   let initialCombat = false;
+  let initialBattleMap: BattleMap | null = null;
+  let initialCombatTracker = coerceCombatTracker(null);
+  let initialInitiative: Array<{ player_id: string; value: number }> = [];
   try {
-    const st = JSON.parse(session.state_json) as { combat?: boolean };
+    const st = JSON.parse(session.state_json) as {
+      combat?: boolean;
+      battleMap?: BattleMap;
+      combatTracker?: unknown;
+      initiative?: Array<{ player_id: string; value: number }>;
+    };
     initialCombat = st.combat === true;
+    if (st.battleMap && typeof st.battleMap === "object") initialBattleMap = stripBattleMapDmSecrets(st.battleMap);
+    initialCombatTracker = coerceCombatTracker(st.combatTracker ?? null);
+    if (Array.isArray(st.initiative)) initialInitiative = st.initiative;
   } catch {}
 
   return (
@@ -54,6 +68,9 @@ export default async function PlayPage({
       initialPlayerId={sp.p}
       initialToken={sp.t}
       initialCombat={initialCombat}
+      initialBattleMap={initialBattleMap}
+      initialCombatTracker={initialCombatTracker}
+      initialInitiative={initialInitiative}
     />
   );
 }

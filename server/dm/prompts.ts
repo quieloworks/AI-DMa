@@ -22,57 +22,9 @@ export type SessionBattleMap = {
   obstacles?: Array<{ x: number; y: number; w?: number; h?: number; kind?: string }>;
 };
 
-/** Fases del reloj de combate 5E (PHB: asalto → iniciativa → turnos en orden → siguiente ronda). No es “turno de app”. */
-export type CombatTrackerPhase =
-  | "initiative"
-  | "awaiting_dice"
-  | "same_turn_resolution"
-  | "turn_open"
-  | "between_actors";
-
-/** Estado explícito del reloj de batalla; lo emite el DM en <acciones> y la app lo persiste. */
-export type SessionCombatTracker = {
-  /** Ronda de combate 5E, empieza en 1 cuando el primer turno tras iniciativa está en juego. */
-  round: number;
-  /** Índice 0…n-1 en la cola de iniciativa (mismo orden que INICIATIVA: mayor tirada primero). */
-  initiative_index: number;
-  /** player_id del PJ ([id]) o id de participants (p. ej. npc:goblin-1) cuyo turno o resolución bloquea el reloj. */
-  turn_of: string;
-  phase: CombatTrackerPhase;
-  /** Una línea en español: qué falta (p. ej. "Tirada de daño del golpe de Lía"). */
-  note?: string;
-};
-
-const COMBAT_TRACKER_PHASES = new Set<string>([
-  "initiative",
-  "awaiting_dice",
-  "same_turn_resolution",
-  "turn_open",
-  "between_actors",
-]);
-
-/** Normaliza combat_tracker del JSON del modelo; null = ausente o inválido. */
-export function coerceCombatTracker(raw: unknown): SessionCombatTracker | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const o = raw as Record<string, unknown>;
-  const round = Number(o.round);
-  const initiative_index = Number(o.initiative_index);
-  const turn_of = typeof o.turn_of === "string" ? o.turn_of.trim() : "";
-  const phaseStr = typeof o.phase === "string" ? o.phase.trim() : "";
-  if (!Number.isFinite(round) || round < 1 || round > 999) return null;
-  if (!Number.isFinite(initiative_index) || initiative_index < 0 || initiative_index > 99) return null;
-  if (!turn_of || turn_of.length > 160) return null;
-  if (!COMBAT_TRACKER_PHASES.has(phaseStr)) return null;
-  const phase = phaseStr as CombatTrackerPhase;
-  const note = typeof o.note === "string" ? o.note.trim().slice(0, 220) : undefined;
-  return {
-    round: Math.floor(round),
-    initiative_index: Math.floor(initiative_index),
-    turn_of,
-    phase,
-    ...(note ? { note } : {}),
-  };
-}
+export type { CombatTrackerPhase, SessionCombatTracker } from "@/lib/session-combat-tracker";
+export { coerceCombatTracker } from "@/lib/session-combat-tracker";
+import type { CombatTrackerPhase, SessionCombatTracker } from "@/lib/session-combat-tracker";
 
 export type SessionSnapshot = {
   storyTitle: string;

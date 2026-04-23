@@ -8,6 +8,11 @@ import {
 } from "@/lib/dm-dice-expression";
 import { useLocale, useTranslations } from "@/components/LocaleProvider";
 import { localizeGamePhrase, localizedAbilityAbbrev, localizedSkillLabel } from "@/lib/i18n/game-localize";
+import { stripBattleMapDmSecrets } from "@/lib/battle-map-dm-secrets";
+import type { BattleMap } from "@/lib/battle-map-types";
+import { coerceCombatTracker, type SessionCombatTracker } from "@/lib/session-combat-tracker";
+import { reachableCells } from "@/lib/tactical-path";
+import { BattleMapCanvas } from "@/app/story/[id]/map";
 
 type Ability = "fue" | "des" | "con" | "int" | "sab" | "car";
 
@@ -38,7 +43,9 @@ type Player = {
   character: { name: string; class: string | null; race: string | null; level: number; data: CharData } | null;
 };
 
-type Tab = "personaje" | "acciones" | "chat" | "dados";
+type Tab = "personaje" | "acciones" | "chat" | "dados" | "mapa";
+
+type InitiativeRow = { player_id: string; value: number };
 
 /** Grupo: crónica compartida. Privado: solo susurros DM↔este jugador (no mezclar con la narración). */
 type ChatSubTab = "group" | "private";
@@ -109,6 +116,9 @@ export function PlayRoom({
   initialPlayerId,
   initialToken,
   initialCombat = false,
+  initialBattleMap = null,
+  initialCombatTracker = null,
+  initialInitiative = [],
 }: {
   sessionId: string;
   storyTitle: string;
@@ -117,6 +127,9 @@ export function PlayRoom({
   initialPlayerId?: string;
   initialToken?: string;
   initialCombat?: boolean;
+  initialBattleMap?: BattleMap | null;
+  initialCombatTracker?: SessionCombatTracker | null;
+  initialInitiative?: InitiativeRow[];
 }) {
   const tr = useTranslations();
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -147,6 +160,11 @@ export function PlayRoom({
   const [diceModifier, setDiceModifier] = useState<number>(0);
   const [dmThinking, setDmThinking] = useState(false);
   const [inCombat, setInCombat] = useState(initialCombat);
+  const [battleMap, setBattleMap] = useState<BattleMap | null>(initialBattleMap ?? null);
+  const [combatTracker, setCombatTracker] = useState<SessionCombatTracker | null>(() =>
+    coerceCombatTracker(initialCombatTracker ?? null)
+  );
+  const [initiative, setInitiative] = useState<InitiativeRow[]>(() => initialInitiative ?? []);
   const [actionToast, setActionToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -175,6 +193,105 @@ export function PlayRoom({
     playerId: picked?.player_id ?? "",
     sessionId,
   };
+
+  useEffect(() => {
+    if (!picked) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/session/${sessionId}`, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { state?: Record<string, unknown> };
+        const st = data.state;
+        if (!st || cancelled) return;
+        if (typeof st.combat === "boolean") setInCombat(st.combat);
+        if (st.combat === true && st.battleMap && typeof st.battleMap === "object") {
+          setBattleMap(stripBattleMapDmSecrets(st.battleMap as BattleMap));
+        } else {
+          setBattleMap(null);
+        }
+        if (st.combat === true) {
+          setCombatTracker(coerceCombatTracker(st.combatTracker ?? null));
+          if (Array.isArray(st.initiative)) setInitiative(st.initiative as InitiativeRow[]);
+        } else {
+          setCombatTracker(null);
+          setInitiative([]);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [picked, sessionId]);
+
+  useEffect(() => {
+    if (tab === "mapa" && (!battleMap || !inCombat)) setTab("personaje");
+  }, [tab, battleMap, inCombat]);
+
+  const mapReach = useMemo(() => {
+    if (!battleMap || !picked || !combatTracker) return null;
+    const canMoveHere =
+      inCombat &&
+      storyMode === "auto" &&
+      combatTracker.turn_of === picked.player_id &&
+      combatTracker.phase === "turn_open";
+    if (!canMoveHere) return null;
+    const me = battleMap.participants.find((p) => p.id === picked.player_id && p.kind === "player");
+    if (!me) return null;
+    const budget =
+      typeof combatTracker.movement_remaining_feet === "number" && Number.isFinite(combatTracker.movement_remaining_feet)
+        ? Math.max(0, Math.floor(combatTracker.movement_remaining_feet))
+        : speed;
+    return reachableCells(battleMap, { x: me.x, y: me.y }, budget, picked.player_id);
+  }, [battleMap, picked, combatTracker, inCombat, storyMode, speed]);
+
+  const submitTacticalMove = useCallback(
+    async (gx: number, gy: number) => {
+      if (!picked || !battleMap) return;
+      try {
+        const res = await fetch(`/api/session/${sessionId}/tactical-move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ playerId: picked.player_id, token: picked.token, toX: gx, toY: gy }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          battleMap?: BattleMap;
+          combatTracker?: SessionCombatTracker;
+        };
+        if (!res.ok || !data.ok) {
+          flashToast(data.error ?? tr("play.mapMoveFailed", { msg: String(res.status) }));
+          return;
+        }
+        if (data.battleMap) setBattleMap(stripBattleMapDmSecrets(data.battleMap));
+        if (data.combatTracker) setCombatTracker(data.combatTracker);
+        flashToast(tr("play.mapMovedOk"));
+      } catch (e) {
+        flashToast(tr("play.mapMoveFailed", { msg: (e as Error).message }));
+      }
+    },
+    [picked, battleMap, sessionId, flashToast, tr]
+  );
+
+  const handleMapCellTap = useCallback(
+    (gx: number, gy: number) => {
+      if (!mapReach?.has(`${gx},${gy}`)) {
+        if (mapReach) flashToast(tr("play.mapMoveDenied"));
+        return;
+      }
+      void submitTacticalMove(gx, gy);
+    },
+    [mapReach, submitTacticalMove, flashToast, tr]
+  );
+
+  const turnActorLabel = useMemo(() => {
+    if (!combatTracker || !battleMap) return "";
+    const tok = battleMap.participants.find((p) => p.id === combatTracker.turn_of);
+    return tok?.name ?? combatTracker.turn_of;
+  }, [combatTracker, battleMap]);
 
   useEffect(() => {
     if (!picked) return;
@@ -289,9 +406,18 @@ export function PlayRoom({
 
     s.on(
       "scene:update",
-      (evt: { sessionId: string; combat?: boolean }) => {
+      (evt: {
+        sessionId: string;
+        combat?: boolean;
+        battleMap?: BattleMap | null;
+        combatTracker?: SessionCombatTracker | null;
+        initiative?: InitiativeRow[];
+      }) => {
         if (evt.sessionId !== sessionId) return;
         if (typeof evt.combat === "boolean") setInCombat(evt.combat);
+        if (evt.battleMap !== undefined) setBattleMap(evt.battleMap ? stripBattleMapDmSecrets(evt.battleMap) : null);
+        if (evt.combatTracker !== undefined) setCombatTracker(evt.combatTracker ? coerceCombatTracker(evt.combatTracker) : null);
+        if (evt.initiative !== undefined) setInitiative(Array.isArray(evt.initiative) ? evt.initiative : []);
       }
     );
 
@@ -533,8 +659,16 @@ export function PlayRoom({
             </div>
           )}
         </div>
-        <div className="flex px-2 pb-2 pt-1">
-          {(["personaje", "acciones", "chat", "dados"] as Tab[]).map((t) => (
+        <div className="flex flex-wrap px-2 pb-2 pt-1">
+          {(
+            [
+              "personaje",
+              "acciones",
+              "chat",
+              "dados",
+              ...(inCombat && battleMap && storyMode === "auto" ? (["mapa"] as const) : []),
+            ] as Tab[]
+          ).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -542,6 +676,7 @@ export function PlayRoom({
               style={{
                 color: tab === t ? "var(--color-accent)" : "var(--color-text-hint)",
                 background: tab === t ? "var(--color-accent-bg)" : "transparent",
+                minWidth: t === "mapa" ? 56 : undefined,
               }}
             >
               {t === "personaje"
@@ -550,7 +685,9 @@ export function PlayRoom({
                   ? tr("play.tabAcciones")
                   : t === "chat"
                     ? tr("play.tabChat")
-                    : tr("play.tabDados")}
+                    : t === "mapa"
+                      ? tr("play.tabMapa")
+                      : tr("play.tabDados")}
               {t === "dados" && pendingDice.length > 0 && (
                 <span
                   className="ml-1 inline-block rounded-full"
@@ -787,6 +924,40 @@ export function PlayRoom({
               onReportManual={reportManualTotal}
               onDismiss={(id) => setPendingDice((prev) => prev.filter((r) => r.id !== id))}
             />
+          </div>
+        )}
+
+        {tab === "mapa" && battleMap && (
+          <div className="flex h-full min-h-0 flex-col overflow-hidden px-2 py-2">
+            {combatTracker && (
+              <div className="mb-2 shrink-0 space-y-1 px-1 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                <p>
+                  {tr("play.mapBannerRound", { n: combatTracker.round })}
+                  {initiative.length > 0 ? ` · ${combatTracker.phase}` : ""}
+                </p>
+                {mapReach ? (
+                  <p style={{ color: "var(--color-accent)" }}>{tr("play.mapYourTurn")}</p>
+                ) : (
+                  <p style={{ color: "var(--color-text-hint)" }}>
+                    {tr("play.mapNotYourTurn", { name: turnActorLabel, phase: combatTracker.phase })}
+                  </p>
+                )}
+                {typeof combatTracker.movement_remaining_feet === "number" && (
+                  <p>{tr("play.mapMoveFeetLeft", { n: combatTracker.movement_remaining_feet })}</p>
+                )}
+              </div>
+            )}
+            <div
+              className="min-h-0 flex-1 overflow-hidden rounded-md"
+              style={{ border: "0.5px solid var(--color-border)", background: "var(--color-bg-secondary)" }}
+            >
+              <BattleMapCanvas
+                battleMap={battleMap}
+                turn={combatTracker?.round}
+                reach={mapReach}
+                onCellTap={mapReach ? handleMapCellTap : undefined}
+              />
+            </div>
           </div>
         )}
       </main>
